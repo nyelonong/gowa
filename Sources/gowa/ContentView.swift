@@ -11,6 +11,14 @@ struct ContentView: View {
         }
         .navigationTitle("Gowa")
         .frame(minWidth: 960, minHeight: 620)
+        .alert("Couldn't open collection", isPresented: Binding(
+            get: { app.openErrorMessage != nil },
+            set: { if !$0 { app.openErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(app.openErrorMessage ?? "")
+        }
     }
 
     private var detail: some View {

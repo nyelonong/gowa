@@ -34,6 +34,8 @@ final class AppState {
     // Rename flow
     var renameTarget: NodePath?
     var renameText: String = ""
+    var renamingCollection = false
+    var openErrorMessage: String?
 
     // Environment
     var activeEnvironment: String?
@@ -104,9 +106,9 @@ final class AppState {
         do {
             let doc = try OpenCollectionDocument.load(from: url)
             apply(doc)
-            statusMessage = nil
+            statusMessage = "Opened \(url.lastPathComponent)"
         } catch {
-            statusMessage = "Failed to open: \(error.localizedDescription)"
+            openErrorMessage = "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
         }
     }
 
@@ -253,6 +255,12 @@ final class AppState {
         }
     }
 
+    func beginRenameCollection() {
+        guard let doc = document else { return }
+        renameText = doc.name
+        renamingCollection = true
+    }
+
     func beginRename(_ path: NodePath) {
         guard let doc = document,
               let node = doc.enumerate().first(where: { $0.path == path })
@@ -262,12 +270,23 @@ final class AppState {
     }
 
     func commitRename() {
+        if renamingCollection {
+            let name = renameText.trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, let doc = document, name != doc.name {
+                doc.name = name
+                hasUnsavedChanges = true
+                statusMessage = "Collection renamed — ⌘S writes info.name to the YAML"
+            }
+            renamingCollection = false
+            return
+        }
         guard let target = renameTarget else { return }
         renameSelection(target, to: renameText)
         renameTarget = nil
     }
 
     func cancelRename() {
+        renamingCollection = false
         renameTarget = nil
     }
 

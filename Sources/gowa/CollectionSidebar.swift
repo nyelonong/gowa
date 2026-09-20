@@ -15,7 +15,7 @@ struct CollectionSidebar: View {
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: 300)
         .alert("Rename", isPresented: Binding(
-            get: { app.renameTarget != nil },
+            get: { app.renameTarget != nil || app.renamingCollection },
             set: { if !$0 { app.cancelRename() } }
         )) {
             TextField("Name", text: $app.renameText)
@@ -80,16 +80,32 @@ struct CollectionSidebar: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text(app.document?.name ?? "Collection")
-                    .font(.headline)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.document?.name ?? "Collection")
+                        .font(.headline)
+                        .lineLimit(1)
+                    if let url = app.document?.url {
+                        Text(url.lastPathComponent)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Button {
+                    app.beginRenameCollection()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Rename collection (writes info.name on save)")
                 if app.hasUnsavedChanges {
                     Circle()
                         .fill(.orange)
                         .frame(width: 7, height: 7)
                         .help("Unsaved changes — ⌘S to save")
                 }
-                Spacer()
             }
 
             HStack(spacing: 8) {
