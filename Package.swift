@@ -6,9 +6,13 @@ let package = Package(
     platforms: [
         .macOS(.v15)
     ],
+    dependencies: [
+        .package(url: "https://github.com/jpsim/Yams", from: "6.2.0")
+    ],
     targets: [
         .executableTarget(
             name: "gowa",
+            dependencies: ["Yams"],
             path: "Sources/gowa"
         ),
         .testTarget(
