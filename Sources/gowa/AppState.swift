@@ -54,7 +54,21 @@ final class AppState {
 
     func newCollection() {
         let doc = OpenCollectionDocument.sample()
+        var starter = OCRequestSnapshot(
+            name: "My First Request",
+            method: "GET",
+            url: "{{baseUrl}}/users",
+            params: [],
+            headers: [],
+            bodyType: nil,
+            bodyData: "",
+            authKind: .none,
+            settings: OCSettings(followRedirects: nil, timeout: nil),
+            docs: nil
+        )
+        let path = doc.addRequest(under: nil, snapshot: starter)
         apply(doc)
+        select(path: path)
         statusMessage = "New collection — ⌘S to save it into a git repo"
     }
 

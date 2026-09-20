@@ -8,12 +8,12 @@ struct CollectionSidebar: View {
 
         Group {
             if app.document != nil {
-                treeList
+                collectionContent
             } else {
                 emptyState
             }
         }
-        .navigationSplitViewColumnWidth(min: 200, ideal: 280)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 300)
         .alert("Rename", isPresented: Binding(
             get: { app.renameTarget != nil },
             set: { if !$0 { app.cancelRename() } }
@@ -25,25 +25,127 @@ struct CollectionSidebar: View {
         }
     }
 
+    // MARK: - No collection open
+
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 36))
+                .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
-            Text("Open a collection")
-                .font(.headline)
-            Text("Collections are OpenCollection YAML files you can keep in git.")
-                .font(.caption)
+            Text("Welcome to Gowa")
+                .font(.title3.weight(.semibold))
+            Text("Organize HTTP requests in collections.\nEach collection is a YAML file you keep in git.")
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            HStack {
-                Button("New") { app.newCollection() }
-                Button("Open…") { app.openCollectionPanel() }
+
+            VStack(spacing: 8) {
+                Button {
+                    app.newCollection()
+                } label: {
+                    Label("Create a new collection", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: 200)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("n")
+
+                Button {
+                    app.openCollectionPanel()
+                } label: {
+                    Label("Open a collection…", systemImage: "folder")
+                        .frame(maxWidth: 200)
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("o")
             }
-            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .padding(24)
+    }
+
+    // MARK: - Collection open
+
+    private var collectionContent: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if app.sidebarTree.isEmpty {
+                emptyCollectionHint
+            } else {
+                treeList
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(app.document?.name ?? "Collection")
+                    .font(.headline)
+                    .lineLimit(1)
+                if app.hasUnsavedChanges {
+                    Circle()
+                        .fill(.orange)
+                        .frame(width: 7, height: 7)
+                        .help("Unsaved changes — ⌘S to save")
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Menu {
+                    Button("New Request") { app.addRequest(under: nil) }
+                    Button("New Folder") { app.addFolder(under: nil) }
+                } label: {
+                    Label("New", systemImage: "plus")
+                }
+                .fixedSize()
+
+                Button("Open…") { app.openCollectionPanel() }
+
+                Button {
+                    app.saveCollection()
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!app.hasUnsavedChanges && app.document?.url != nil)
+
+                Spacer(minLength: 0)
+
+                if app.document?.url != nil {
+                    Button {
+                        app.revealCollectionInFinder()
+                    } label: {
+                        Image(systemName: "arrow.up.forward.app")
+                    }
+                    .help("Reveal collection file in Finder")
+                }
+            }
+        }
+        .padding(10)
+    }
+
+    private var emptyCollectionHint: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+            Text("This collection is empty")
+                .font(.callout.weight(.medium))
+            Text("Add your first request to get started.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Add a Request") { app.addRequest(under: nil) }
+                .buttonStyle(.borderedProminent)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("New Request") { app.addRequest(under: nil) }
+            Button("New Folder") { app.addFolder(under: nil) }
+        }
     }
 
     private var treeList: some View {
@@ -53,39 +155,9 @@ struct CollectionSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                Button {
-                    app.newCollection()
-                } label: {
-                    Image(systemName: "plus.square")
-                }
-                .help("New collection")
-
-                Button {
-                    app.openCollectionPanel()
-                } label: {
-                    Image(systemName: "square.and.arrow.down")
-                }
-                .help("Open collection (⌘O)")
-
-                Button {
-                    app.saveCollection()
-                } label: {
-                    Image(systemName: app.hasUnsavedChanges ? "square.and.arrow.up" : "checkmark.square")
-                }
-                .help(app.hasUnsavedChanges ? "Save (⌘S) — unsaved changes" : "Saved")
-                .opacity(app.hasUnsavedChanges ? 1 : 0.5)
-
-                if let url = app.document?.url {
-                    Button {
-                        app.revealCollectionInFinder()
-                    } label: {
-                        Image(systemName: "arrow.up.forward.app")
-                    }
-                    .help("Reveal in Finder")
-                }
-            }
+        .contextMenu {
+            Button("New Request") { app.addRequest(under: nil) }
+            Button("New Folder") { app.addFolder(under: nil) }
         }
         .overlay(alignment: .bottom) {
             if let message = app.statusMessage {

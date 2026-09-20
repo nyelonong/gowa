@@ -7,11 +7,28 @@ struct RequestEditor: View {
         if let draft = app.draft {
             EditorContent(app: app, draft: draft)
         } else if app.document != nil {
-            ContentUnavailableView(
-                "No request selected",
-                systemImage: "cursorarrow.rays",
-                description: Text("Pick a request from the collection, or right-click a folder to create one")
-            )
+            VStack(spacing: 12) {
+                Image(systemName: "cursorarrow.rays")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.tertiary)
+                Text("No request selected")
+                    .font(.title3.weight(.medium))
+                Text("Pick one in the sidebar, or add a new one:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button {
+                        app.addRequest(under: nil)
+                    } label: {
+                        Label("New Request", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Menu("New Folder") {
+                        Button("At top level") { app.addFolder(under: nil) }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
