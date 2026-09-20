@@ -27,9 +27,6 @@ struct ContentView: View {
                 welcome
             } else {
             VStack(spacing: 0) {
-                if !app.environments.isEmpty {
-                    environmentBar
-                }
                 if !app.missingSecrets.isEmpty {
                     missingSecretsBar
                 }
@@ -107,32 +104,4 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder
-    private var environmentBar: some View {
-        HStack(spacing: 10) {
-            Picker("Environment", selection: Binding(
-                get: { app.activeEnvironment ?? "" },
-                set: { app.activeEnvironment = $0.isEmpty ? nil : $0 }
-            )) {
-                Text("No environment").tag("")
-                ForEach(app.environments) { env in
-                    Text(env.name).tag(env.name)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 200)
-
-            Button {
-                app.showingEnvironmentManager = true
-            } label: {
-                Label("Environments", systemImage: "slider.horizontal.3")
-            }
-            .controlSize(.small)
-            .help("Manage environments and variables")
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
 }

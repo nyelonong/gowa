@@ -139,6 +139,29 @@ struct CollectionSidebar: View {
                     .help("Reveal collection file in Finder")
                 }
             }
+
+            if !app.environments.isEmpty {
+                HStack(spacing: 6) {
+                    Picker("Environment", selection: Binding(
+                        get: { app.activeEnvironment ?? "" },
+                        set: { app.activeEnvironment = $0.isEmpty ? nil : $0 }
+                    )) {
+                        Text("No environment").tag("")
+                        ForEach(app.environments) { env in
+                            Text(env.name).tag(env.name)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        app.showingEnvironmentManager = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .help("Manage environments and variables")
+                }
+            }
         }
         .padding(10)
     }
