@@ -1,6 +1,3 @@
-.zig-cache/
-zig-out/
-zig-pkg/
 .build/
 Gowa.app/
 .DS_Store

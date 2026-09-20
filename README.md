@@ -41,6 +41,3 @@ swift test
 | `Sources/gowa/HTTPClient.swift` | Async URLSession engine, redirect policy, status phrases |
 | `Sources/gowa/JSONHighlighter.swift` | AttributedString JSON tokenizer + pretty-print |
 | `Sources/gowa/HistoryStore.swift` | Codable history persisted in Application Support |
-
-The `zig-v1` directory (if present) holds the earlier Zig + Gooey prototype,
-kept for reference.
