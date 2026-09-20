@@ -57,6 +57,25 @@ final class AppState {
     let history = HistoryStore()
     private let client = HTTPClient()
 
+    private static let lastCollectionKey = "gowa.lastCollection"
+
+    init() {
+        restoreLastCollection()
+    }
+
+    /// Reopens the most recently opened or saved collection at launch.
+    private func restoreLastCollection() {
+        guard let path = UserDefaults.standard.string(forKey: Self.lastCollectionKey),
+              FileManager.default.fileExists(atPath: path)
+        else { return }
+        openCollection(at: URL(fileURLWithPath: path))
+    }
+
+    private func rememberCurrentCollection() {
+        guard let path = document?.url?.path else { return }
+        UserDefaults.standard.set(path, forKey: Self.lastCollectionKey)
+    }
+
     var canSend: Bool { draft != nil && !busy }
     // MARK: - Collection lifecycle
 
@@ -154,6 +173,7 @@ final class AppState {
 
     private func apply(_ doc: OpenCollectionDocument) {
         document = doc
+        rememberCurrentCollection()
         hasUnsavedChanges = false
         selectedRequestPath = nil
         draft = nil
