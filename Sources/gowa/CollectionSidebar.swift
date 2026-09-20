@@ -295,6 +295,8 @@ struct SidebarRow: View {
                 .truncationMode(.middle)
         }
         .contextMenu {
+            Button("Copy as cURL") { app.copyAsCurl(at: node.node.path) }
+            Divider()
             Button("Rename…") { app.beginRename(node.node.path) }
             Button("Duplicate") { app.duplicate(node.node.path) }
             Divider()

@@ -12,6 +12,11 @@ struct GowaApp: App {
         }
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .textEditing) {
+                Button("Find in Response") { app.beginFindInResponse() }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(app.draft == nil)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Collection") { app.newCollection() }
                     .keyboardShortcut("n")

@@ -113,7 +113,7 @@ final class AppState {
 
     /// File panels attach as sheets to the key window so they can never
     /// drift to a detached position (e.g. a secondary display).
-    private func presentAsSheet(_ panel: NSSavePanel, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+    func presentAsSheet(_ panel: NSSavePanel, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window, completionHandler: completion)
         } else {
@@ -346,6 +346,53 @@ final class AppState {
         return "\(base) \(n)"
     }
 
+    // MARK: - cURL export
+
+    func copyAsCurl() {
+        guard let snapshot = draft else { return }
+        let vars = document?.resolveVariables(in: activeEnvironment).values ?? [:]
+        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(CurlBuilder.command(from: effective), forType: .string)
+        statusMessage = "cURL copied to clipboard (interpolated with the active environment)"
+    }
+
+    func copyAsCurl(at path: NodePath) {
+        guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else { return }
+        let vars = doc.resolveVariables(in: activeEnvironment).values
+        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(CurlBuilder.command(from: effective), forType: .string)
+        statusMessage = "cURL copied to clipboard"
+    }
+
+    func saveResponse() {
+        guard let result else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save Response"
+        panel.allowedContentTypes = [.data]
+        let name = (result.url.lastPathComponent as NSString).deletingPathExtension
+        panel.nameFieldStringValue = "\(name.isEmpty ? "response" : name).body"
+        panel.directoryURL = defaultWorkspaceDirectory
+        presentAsSheet(panel) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try result.body.write(to: url)
+                self.statusMessage = "Response saved to \(url.lastPathComponent)"
+            } catch {
+                self.statusMessage = "Save failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    var findTrigger: Int = 0
+
+    func beginFindInResponse() {
+        findTrigger += 1
+    }
+
     // MARK: - cURL import
 
     func addRequestFromCurl(_ snapshot: OCRequestSnapshot, under parent: NodePath?) {
@@ -517,6 +564,7 @@ final class AppState {
         var headers: [(name: String, value: String)]
         var body: String
         var followRedirects: Bool
+        var timeout: Int?
     }
 
     /// Interpolate variables, apply auth, and fold query params into the URL.
@@ -561,7 +609,8 @@ final class AppState {
             url: urlWithParams,
             headers: headers,
             body: body,
-            followRedirects: snapshot.settings.followRedirects ?? true
+            followRedirects: snapshot.settings.followRedirects ?? true,
+            timeout: snapshot.settings.timeout
         )
     }
 

@@ -16,7 +16,7 @@ struct ResponseArea: View {
                     Text(error)
                 }
             } else if let result = app.result, let display = app.bodyDisplay {
-                ResponseView(result: result, display: display)
+                ResponseView(app: app, result: result, display: display)
             } else {
                 ContentUnavailableView(
                     "Gowa",
@@ -30,6 +30,7 @@ struct ResponseArea: View {
 }
 
 struct ResponseView: View {
+    let app: AppState
     let result: HTTPResult
     let display: BodyDisplay
     @State private var tab: Tab = .body
@@ -80,6 +81,30 @@ struct ResponseView: View {
                         .font(.callout)
                         .controlSize(.small)
                 }
+
+                Button {
+                    app.beginFindInResponse()
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.plain)
+                .help("Find in response (⌘F)")
+
+                Button {
+                    app.copyAsCurl()
+                } label: {
+                    Image(systemName: "curlybraces.square")
+                }
+                .buttonStyle(.plain)
+                .help("Copy request as cURL")
+
+                Button {
+                    app.saveResponse()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .buttonStyle(.plain)
+                .help("Save response body to file")
 
                 Button {
                     let pasteboard = NSPasteboard.general
