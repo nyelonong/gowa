@@ -18,6 +18,7 @@ final class AppState {
 
     var busy = false
     var result: HTTPResult?
+    var bodyDisplay: BodyDisplay?
     var errorText: String?
 
     let history = HistoryStore()
@@ -36,6 +37,7 @@ final class AppState {
         guard canSend else { return }
         busy = true
         result = nil
+        bodyDisplay = nil
         errorText = nil
         let method = method
         let urlText = url
@@ -54,6 +56,10 @@ final class AppState {
                 )
                 self.result = response
                 self.history.record(method: method, url: urlText, body: body, status: response.status)
+                let display = await Task.detached(priority: .userInitiated) {
+                    BodyDisplay.build(response, bodyText: String(data: response.body.prefix(16 << 20), encoding: .utf8) ?? "")
+                }.value
+                self.bodyDisplay = display
             } catch {
                 self.errorText = error.localizedDescription
                 self.history.record(method: method, url: urlText, body: body, status: nil)
@@ -68,6 +74,7 @@ final class AppState {
         self.url = entry.url
         self.requestBody = entry.body
         self.result = nil
+        self.bodyDisplay = nil
         self.errorText = nil
     }
 

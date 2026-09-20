@@ -262,8 +262,8 @@ struct ResponseArea: View {
                 } description: {
                     Text(error)
                 }
-            } else if let result = app.result {
-                ResponseView(result: result)
+            } else if let result = app.result, let display = app.bodyDisplay {
+                ResponseView(result: result, display: display)
             } else {
                 ContentUnavailableView(
                     "Gowa",
@@ -278,6 +278,7 @@ struct ResponseArea: View {
 
 struct ResponseView: View {
     let result: HTTPResult
+    let display: BodyDisplay
     @State private var tab: Tab = .body
     @State private var prettyPrinted = false
 
@@ -287,20 +288,8 @@ struct ResponseView: View {
         var id: String { rawValue }
     }
 
-    private var contentType: String? {
-        result.headers.first { $0.name.lowercased() == "content-type" }?.value
-    }
-
-    private var bodyText: String? {
-        String(data: result.body.prefix(4 << 20), encoding: .utf8)
-    }
-
-    private var displayText: String {
-        let raw = bodyText ?? ""
-        if prettyPrinted, let formatted = JSONHighlighter.prettyPrint(raw) {
-            return formatted
-        }
-        return raw
+    private var shownText: String {
+        display.text(prettyPrinted: prettyPrinted)
     }
 
     var body: some View {
@@ -332,24 +321,22 @@ struct ResponseView: View {
 
                 Spacer()
 
-                if let text = bodyText, JSONHighlighter.isJSON(text, contentType: contentType) {
+                if display.isJSON {
                     Toggle("Format", isOn: $prettyPrinted)
                         .toggleStyle(.checkbox)
                         .font(.callout)
                         .controlSize(.small)
                 }
 
-                if bodyText != nil {
-                    Button {
-                        let pasteboard = NSPasteboard.general
-                        pasteboard.clearContents()
-                        pasteboard.setString(displayText, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy body")
+                Button {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(shownText, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
                 }
+                .buttonStyle(.plain)
+                .help("Copy body")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -358,36 +345,26 @@ struct ResponseView: View {
 
             switch tab {
             case .body:
-                responseBody
+                if result.body.isEmpty {
+                    ContentUnavailableView(
+                        "Empty body",
+                        systemImage: "doc",
+                        description: Text("The response carried no content")
+                    )
+                } else if !display.isJSON && String(data: result.body.prefix(16), encoding: .utf8) == nil {
+                    ContentUnavailableView(
+                        "Binary response",
+                        systemImage: "doc.text",
+                        description: Text("\(ByteCountFormatter.string(fromByteCount: Int64(result.body.count), countStyle: .binary)) of non-text data")
+                    )
+                } else {
+                    CodeViewer(
+                        text: shownText,
+                        runs: display.runs(prettyPrinted: prettyPrinted)
+                    )
+                }
             case .headers:
                 headersList
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var responseBody: some View {
-        ScrollView {
-            if let text = bodyText {
-                if JSONHighlighter.isJSON(text, contentType: contentType) {
-                    Text(JSONHighlighter.highlight(displayText))
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                } else {
-                    Text(displayText)
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
-            } else {
-                Text("\(result.body.count) bytes (binary)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
             }
         }
     }
