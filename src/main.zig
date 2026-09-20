@@ -12,7 +12,9 @@ pub const AppState = state_mod.AppState;
 const ui = gooey.ui;
 const Cx = gooey.Cx;
 const Button = gooey.components.Button;
+const Checkbox = gooey.components.Checkbox;
 const Select = gooey.components.Select;
+const TextArea = gooey.components.TextArea;
 const TextInput = gooey.components.TextInput;
 
 const colors = struct {
@@ -21,8 +23,13 @@ const colors = struct {
     const text = ui.Color.rgb8(235, 237, 240);
     const muted = ui.Color.rgb8(140, 148, 160);
     const accent = ui.Color.rgb8(88, 199, 172);
+    const info = ui.Color.rgb8(96, 165, 250);
     const danger = ui.Color.rgb8(240, 97, 108);
 };
+
+fn statusColor(code: u16) ui.Color {
+    return if (code < 300) colors.accent else if (code < 400) colors.info else colors.danger;
+}
 
 var state = AppState{};
 
@@ -109,7 +116,36 @@ const RequestBar = struct {
                 },
                 action,
             }),
+            RedirectRow{},
+            RequestBodyBlock{},
         }));
+    }
+};
+
+const RedirectRow = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+
+        cx.render(Checkbox{
+            .checked = s.follow_redirects,
+            .label = "Follow redirects",
+            .on_click_handler = cx.update(AppState.toggleFollowRedirects),
+        });
+    }
+};
+
+const RequestBodyBlock = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+        if (!s.method().requestHasBody()) return;
+
+        cx.render(TextArea{
+            .id = "request-body",
+            .placeholder = "Request body",
+            .bind = &s.request_body,
+            .fill_width = true,
+            .height = 96,
+        });
     }
 };
 
@@ -130,13 +166,14 @@ const StatusLine = struct {
         } else if (s.status_code) |code| {
             var size_buf: [16]u8 = undefined;
             const st: std.http.Status = @enumFromInt(code);
-            cx.render(ui.textFmt("HTTP {d} {s} · {s}", .{
+            cx.render(ui.textFmt("HTTP {d} {s} · {s} · {d} ms", .{
                 code,
                 st.phrase() orelse "",
                 state_mod.formatBytes(&size_buf, s.pending_body_len),
+                s.elapsed_ms,
             }, .{
                 .size = 13,
-                .color = if (code < 400) colors.accent else colors.danger,
+                .color = statusColor(code),
             }));
         } else {
             cx.render(ui.text("Enter a URL and press Send", .{

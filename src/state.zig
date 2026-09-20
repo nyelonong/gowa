@@ -13,6 +13,7 @@ pub const body_cap = 1 << 20;
 pub const preview_cap = 16 * 1024;
 const detail_cap = 256;
 const headers_cap = 16 * 1024;
+pub const request_body_cap = 64 * 1024;
 
 pub const method_names = [_][]const u8{ "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS" };
 
@@ -30,7 +31,7 @@ fn methodAt(index: ?usize) std.http.Method {
 }
 
 pub const WorkerResult = union(enum) {
-    ok: struct { status: u16, body_len: u32, headers_len: u32 },
+    ok: struct { status: u16, body_len: u32, headers_len: u32, elapsed_ms: u32 },
     failed: struct { detail_len: u32 },
     cancelled,
 };
@@ -38,9 +39,12 @@ pub const WorkerResult = union(enum) {
 pub const AppState = struct {
     url: []const u8 = "",
     method_index: ?usize = 0,
+    request_body: []const u8 = "",
+    follow_redirects: bool = true,
     busy: bool = false,
     status_code: ?u16 = null,
     failed: bool = false,
+    elapsed_ms: u64 = 0,
 
     pending_url_buf: [url_cap]u8 = undefined,
     pending_url_len: usize = 0,
@@ -50,6 +54,9 @@ pub const AppState = struct {
     pending_detail_len: usize = 0,
     pending_headers_buf: [headers_cap]u8 = undefined,
     pending_headers_len: usize = 0,
+    pending_request_body_buf: [request_body_cap]u8 = undefined,
+    pending_request_body_len: usize = 0,
+    pending_follow_redirects: bool = true,
 
     pending_request: ?std.Io.Future(void) = null,
     result_buffer: [RESULT_QUEUE_CAPACITY]WorkerResult = undefined,
@@ -93,6 +100,14 @@ pub const AppState = struct {
         self.requestRender();
     }
 
+    fn stageRequestBody(self: *AppState) bool {
+        const src = self.request_body;
+        if (src.len > request_body_cap) return false;
+        @memcpy(self.pending_request_body_buf[0..src.len], src);
+        self.pending_request_body_len = src.len;
+        return true;
+    }
+
     fn requestRender(self: *AppState) void {
         if (self.window_ptr) |window| window.requestRender();
     }
@@ -110,6 +125,10 @@ pub const AppState = struct {
         self.method_index = index;
     }
 
+    pub fn toggleFollowRedirects(self: *AppState) void {
+        self.follow_redirects = !self.follow_redirects;
+    }
+
     pub fn send(self: *AppState) void {
         if (self.busy) return;
         const url = self.trimmedUrl();
@@ -125,13 +144,20 @@ pub const AppState = struct {
             return;
         };
 
+        self.pending_request_body_len = 0;
+        if (self.method().requestHasBody()) {
+            if (!self.stageRequestBody()) return self.fail("Request body too large");
+        }
+
         @memcpy(self.pending_url_buf[0..url.len], url);
         self.pending_url_len = url.len;
         self.pending_body_len = 0;
         self.pending_detail_len = 0;
         self.pending_headers_len = 0;
+        self.pending_follow_redirects = self.follow_redirects;
         self.status_code = null;
         self.failed = false;
+        self.elapsed_ms = 0;
         self.busy = true;
 
         const io = main_mod.process_io;
@@ -175,6 +201,7 @@ pub const AppState = struct {
                 self.status_code = ok.status;
                 self.pending_body_len = ok.body_len;
                 self.pending_headers_len = ok.headers_len;
+                self.elapsed_ms = ok.elapsed_ms;
             },
             .failed => |f| {
                 self.awaitPendingRequest(io);
@@ -204,19 +231,28 @@ fn fetchWorker(io: Io, app: *AppState, queue: *std.Io.Queue(WorkerResult)) void 
     defer arena_state.deinit();
 
     const url = app.pending_url_buf[0..app.pending_url_len];
+    const payload: ?[]const u8 = if (app.pending_request_body_len > 0)
+        app.pending_request_body_buf[0..app.pending_request_body_len]
+    else
+        null;
+
+    const start = Io.Timestamp.now(io, .awake);
     const result: WorkerResult = blk: {
-        const fetched = http_engine.fetch(
-            io,
-            arena_state.allocator(),
-            app.method(),
-            url,
-            app.pending_body_buf.len,
-            &app.pending_headers_buf,
-        ) catch |e| {
+        const fetched = http_engine.fetch(io, arena_state.allocator(), .{
+            .method = app.method(),
+            .url = url,
+            .payload = payload,
+            .follow_redirects = app.pending_follow_redirects,
+            .body_max = app.pending_body_buf.len,
+            .headers_out = &app.pending_headers_buf,
+        }) catch |e| {
             if (e == error.Canceled) break :blk .cancelled;
             app.stageDetail("Request failed: {s}", .{@errorName(e)});
             break :blk .{ .failed = .{ .detail_len = @intCast(app.pending_detail_len) } };
         };
+        const elapsed = start.durationTo(Io.Timestamp.now(io, .awake));
+        const elapsed_ms: u32 = @intCast(@divTrunc(elapsed.nanoseconds, std.time.ns_per_ms));
+
         const n = @min(fetched.body.len, app.pending_body_buf.len);
         @memcpy(app.pending_body_buf[0..n], fetched.body[0..n]);
         app.pending_body_len = n;
@@ -225,6 +261,7 @@ fn fetchWorker(io: Io, app: *AppState, queue: *std.Io.Queue(WorkerResult)) void 
             .status = fetched.status,
             .body_len = @intCast(n),
             .headers_len = @intCast(fetched.headers_len),
+            .elapsed_ms = elapsed_ms,
         } };
     };
 
@@ -246,4 +283,20 @@ test "formatBytes renders human sizes" {
     try std.testing.expectEqualStrings("1.0 kB", formatBytes(&buf, 1024));
     try std.testing.expectEqualStrings("1.5 MB", formatBytes(&buf, 1572864));
     try std.testing.expectEqualStrings("0 B", formatBytes(&buf, 0));
+}
+
+test "isText validates utf8" {
+    try std.testing.expect(AppState.isText("hello world"));
+    try std.testing.expect(AppState.isText(""));
+    try std.testing.expect(!AppState.isText(&[_]u8{ 0xFF, 0xFE, 0x00 }));
+}
+
+test "stageRequestBody enforces the cap" {
+    var s = AppState{};
+    s.request_body = "hello";
+    try std.testing.expect(s.stageRequestBody());
+    try std.testing.expectEqualStrings("hello", s.pending_request_body_buf[0..s.pending_request_body_len]);
+
+    s.request_body = "x" ** (request_body_cap + 1);
+    try std.testing.expect(!s.stageRequestBody());
 }
