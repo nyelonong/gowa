@@ -4,6 +4,26 @@ A fast, light, beautiful HTTP client for macOS — native SwiftUI, with
 collections stored as [OpenCollection](https://www.opencollection.com/) YAML
 files you can keep in git.
 
+## Install
+
+**One line** — downloads the latest release into `/Applications`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nyelonong/gowa/main/scripts/install.sh | sh
+```
+
+**Manual**: grab `Gowa.app.zip` from the [latest release](https://github.com/nyelonong/gowa/releases/latest), unzip, and drag `Gowa.app` to `/Applications`.
+
+> The app is ad-hoc signed (no Apple notarization). macOS may show an
+> "unidentified developer" warning on first launch — right-click → Open
+> once, or let the install script clear the quarantine flag.
+
+**Build from source**:
+
+```sh
+swift build -c release && scripts/make-app.sh
+```
+
 ## Features
 
 - **Collections in git** — every collection is a single, spec-conformant
