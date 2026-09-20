@@ -50,6 +50,12 @@ struct ContentView: View {
         )) {
             CurlImportSheet(app: app)
         }
+        .sheet(isPresented: Binding(
+            get: { app.showingRunner },
+            set: { app.showingRunner = $0 }
+        )) {
+            RunnerSheet(app: app)
+        }
     }
 
     private var missingSecretsBar: some View {

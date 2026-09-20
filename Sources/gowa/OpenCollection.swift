@@ -62,6 +62,13 @@ struct OCCapture: Equatable, Sendable {
     var disabled: Bool
 }
 
+struct OCAssertion: Equatable, Sendable {
+    var expression: String // res.status, res.body.path, res.headers.Name, res.time
+    var op: String // eq, neq, gt, gte, lt, lte, contains, startsWith, endsWith, isString, isNumber, isBoolean, exists, notExists
+    var value: String
+    var disabled: Bool
+}
+
 struct OCSettings: Equatable, Sendable {
     var followRedirects: Bool?
     var timeout: Int?
@@ -78,6 +85,7 @@ struct OCRequestSnapshot: Sendable {
     var authKind: OAuthKind
     var settings: OCSettings
     var captures: [OCCapture] = []
+    var assertions: [OCAssertion] = []
     var docs: String?
 }
 
@@ -303,7 +311,7 @@ final class OpenCollectionDocument {
             "info": ["name": snapshot.name, "type": "http"],
             "http": buildHTTP(snapshot, preserving: [:]),
         ]
-        writeCaptures(snapshot.captures, into: &item, preserving: item)
+        writeRuntime(snapshot, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs }
         return append(item, under: parent)
     }
@@ -394,8 +402,21 @@ final class OpenCollectionDocument {
                 timeout: settings["timeout"] as? Int
             ),
             captures: Self.readCaptures(item),
+            assertions: Self.readAssertions(item),
             docs: item["docs"] as? String
         )
+    }
+
+    private static func readAssertions(_ item: [String: Any]) -> [OCAssertion] {
+        let runtime = item["runtime"] as? [String: Any] ?? [:]
+        return (runtime["assertions"] as? [[String: Any]] ?? []).map { entry in
+            OCAssertion(
+                expression: entry["expression"] as? String ?? "",
+                op: entry["operator"] as? String ?? "eq",
+                value: entry["value"] as? String ?? "",
+                disabled: entry["disabled"] as? Bool ?? false
+            )
+        }
     }
 
     private static func readCaptures(_ item: [String: Any]) -> [OCCapture] {
@@ -433,21 +454,21 @@ final class OpenCollectionDocument {
         item["info"] = info
 
         item["http"] = buildHTTP(snapshot, preserving: item)
-        writeCaptures(snapshot.captures, into: &item, preserving: item)
+        writeRuntime(snapshot, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs } else { item.removeValue(forKey: "docs") }
         write(item, at: path)
     }
 
-    /// Writes after-response set-variable captures into `runtime.actions`,
-    /// preserving any other actions and runtime sections (scripts,
-    /// assertions, variables) untouched.
-    private func writeCaptures(_ captures: [OCCapture], into item: inout [String: Any], preserving current: [String: Any]) {
+    /// Writes Gowa-owned runtime sections (after-response captures, checks)
+    /// into `runtime`, preserving foreign content (other phases, scripts,
+    /// variables) untouched.
+    private func writeRuntime(_ snapshot: OCRequestSnapshot, into item: inout [String: Any], preserving current: [String: Any]) {
         var runtime = current["runtime"] as? [String: Any] ?? [:]
-        var actions = runtime["actions"] as? [[String: Any]] ?? []
 
+        var actions = runtime["actions"] as? [[String: Any]] ?? []
         let otherActions = actions.filter { ($0["type"] as? String) != "set-variable" || (($0["phase"] as? String) ?? "after-response") != "after-response" }
         var ours: [[String: Any]] = []
-        for capture in captures where !capture.variableName.isEmpty && !capture.expression.isEmpty {
+        for capture in snapshot.captures where !capture.variableName.isEmpty && !capture.expression.isEmpty {
             ours.append([
                 "type": "set-variable",
                 "phase": "after-response",
@@ -461,6 +482,21 @@ final class OpenCollectionDocument {
         } else {
             runtime["actions"] = otherActions + ours
         }
+
+        let checks: [[String: Any]] = snapshot.assertions
+            .filter { !$0.expression.isEmpty }
+            .map { assertion in
+                var entry: [String: Any] = ["expression": assertion.expression, "operator": assertion.op]
+                if !assertion.value.isEmpty { entry["value"] = assertion.value }
+                if assertion.disabled { entry["disabled"] = true }
+                return entry
+            }
+        if checks.isEmpty {
+            runtime.removeValue(forKey: "assertions")
+        } else {
+            runtime["assertions"] = checks
+        }
+
         if runtime.isEmpty {
             item.removeValue(forKey: "runtime")
         } else {
@@ -637,6 +673,96 @@ final class OpenCollectionDocument {
         case is NSNull: return nil
         default: return nil
         }
+    }
+
+    struct AssertionOutcome: Sendable {
+        let expression: String
+        let op: String
+        let expected: String?
+        let actual: String?
+        let pass: Bool
+        let note: String?
+    }
+
+    /// Evaluate one check against a response. Expressions:
+    /// `res.status`, `res.time` (ms), `res.body`, `res.body.<json path>`,
+    /// `res.headers.<name>`.
+    nonisolated static func evaluateAssertion(_ assertion: OCAssertion, response: HTTPResult) -> AssertionOutcome {
+        let expression = assertion.expression.trimmingCharacters(in: .whitespaces)
+        let actual: String?
+        var note: String?
+
+        if expression == "res.status" {
+            actual = String(response.status)
+        } else if expression == "res.time" {
+            let ms = Double(response.elapsed.components.seconds) * 1000
+                + Double(response.elapsed.components.attoseconds) / 1e18
+            actual = String(format: "%.0f", ms)
+        } else if expression == "res.body" {
+            actual = String(data: response.body, encoding: .utf8)
+        } else if expression.hasPrefix("res.body.") {
+            let path = String(expression.dropFirst("res.body.".count))
+            actual = evaluateCapture("$." + path, body: response.body)
+        } else if expression.hasPrefix("res.headers.") {
+            let name = String(expression.dropFirst("res.headers.".count)).lowercased()
+            actual = response.headers.first { $0.name.lowercased() == name }?.value
+        } else {
+            actual = nil
+            note = "unsupported expression"
+        }
+
+        return AssertionOutcome(
+            expression: assertion.expression,
+            op: assertion.op,
+            expected: assertion.value.isEmpty ? nil : assertion.value,
+            actual: actual,
+            pass: compare(actual: actual, op: assertion.op, expected: assertion.value),
+            note: note
+        )
+    }
+
+    nonisolated static func compare(actual: String?, op: String, expected: String) -> Bool {
+        switch op {
+        case "exists":
+            return actual != nil
+        case "notExists":
+            return actual == nil
+        case "isString":
+            return actual != nil && Double(actual!) == nil && !(actual == "true" || actual == "false")
+        case "isNumber":
+            return actual != nil && Double(actual!) != nil
+        case "isBoolean":
+            return actual == "true" || actual == "false"
+        case "isNull":
+            return actual == nil
+        default:
+            break
+        }
+        guard let actual else { return false }
+
+        switch op {
+        case "eq": return actual == expected || numericEqual(actual, expected)
+        case "neq": return !(actual == expected || numericEqual(actual, expected))
+        case "contains": return actual.contains(expected)
+        case "startsWith": return actual.hasPrefix(expected)
+        case "endsWith": return actual.hasSuffix(expected)
+        case "gt", "gte", "lt", "lte":
+            guard let a = Double(actual), let b = Double(expected) else { return false }
+            switch op {
+            case "gt": return a > b
+            case "gte": return a >= b
+            case "lt": return a < b
+            case "lte": return a <= b
+            default: return false
+            }
+        default:
+            return false
+        }
+    }
+
+    private nonisolated static func numericEqual(_ a: String, _ b: String) -> Bool {
+        guard let x = Double(a), let y = Double(b) else { return false }
+        return x == y
     }
 
     /// Substitute `{{name}}` placeholders; unknown variables stay literal.

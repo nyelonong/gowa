@@ -56,6 +56,7 @@ private struct EditorContent: View {
         case auth = "Auth"
         case body = "Body"
         case captures = "Captures"
+        case checks = "Checks"
         case settings = "Settings"
         var id: String { rawValue }
     }
@@ -148,7 +149,7 @@ private struct EditorContent: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 380)
+            .frame(width: 520)
             .padding(.bottom, 8)
 
             switch section {
@@ -157,6 +158,7 @@ private struct EditorContent: View {
             case .auth: AuthSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .body: BodySection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .captures: CaptureRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
+            case .checks: CheckRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .settings: SettingsSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             }
         }
@@ -635,6 +637,80 @@ struct CaptureRows: View {
 
     private func update(_ change: (inout OCRequestSnapshot) -> Void) {
         commit(change)
+    }
+}
+
+// MARK: - Checks
+
+struct CheckRows: View {
+    let app: AppState
+    let draft: OCRequestSnapshot
+    let commit: RequestCommitter
+
+    static let operators = ["eq", "neq", "gt", "gte", "lt", "lte", "contains", "startsWith", "endsWith", "isString", "isNumber", "isBoolean", "exists", "notExists"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Checks run after every send and in folder runs. Expressions: res.status, res.time, res.body, res.body.<json path>, res.headers.<name>.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(draft.assertions.indices, id: \.self) { index in
+                HStack(spacing: 6) {
+                    Toggle("", isOn: Binding(
+                        get: { !draft.assertions[index].disabled },
+                        set: { enabled in commit { snapshot in snapshot.assertions[index].disabled = !enabled } }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+
+                    TextField("res.status", text: Binding(
+                        get: { draft.assertions[index].expression },
+                        set: { newExpression in commit { snapshot in snapshot.assertions[index].expression = newExpression } }
+                    ))
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 200)
+
+                    Picker("", selection: Binding(
+                        get: { draft.assertions[index].op },
+                        set: { newOp in commit { snapshot in snapshot.assertions[index].op = newOp } }
+                    )) {
+                        ForEach(Self.operators, id: \.self) { op in
+                            Text(op).tag(op)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 110)
+
+                    TextField("value", text: Binding(
+                        get: { draft.assertions[index].value },
+                        set: { newValue in commit { snapshot in snapshot.assertions[index].value = newValue } }
+                    ))
+                    .font(.system(.callout, design: .monospaced))
+                    .disabled(draft.assertions[index].op.hasPrefix("is") || draft.assertions[index].op == "exists" || draft.assertions[index].op == "notExists")
+
+                    Button {
+                        commit { snapshot in snapshot.assertions.remove(at: index) }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Button {
+                commit { snapshot in
+                    snapshot.assertions.append(OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false))
+                }
+            } label: {
+                Label("Add check", systemImage: "plus.circle")
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
     }
 }
 

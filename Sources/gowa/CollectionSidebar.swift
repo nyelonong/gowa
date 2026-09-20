@@ -146,6 +146,13 @@ struct CollectionSidebar: View {
 
                 Spacer(minLength: 0)
 
+                Button {
+                    app.startRunner(under: nil)
+                } label: {
+                    Image(systemName: "play.circle")
+                }
+                .help("Run all requests (top to bottom)")
+
                 if app.document?.url != nil {
                     Button {
                         app.revealCollectionInFinder()
@@ -273,6 +280,8 @@ struct SidebarRow: View {
                 .lineLimit(1)
         }
         .contextMenu {
+            Button("Run all") { app.startRunner(under: node.node.path) }
+            Divider()
             Button("New Request") { app.addRequest(under: node.node.path) }
             Button("New Folder") { app.addFolder(under: node.node.path) }
             Divider()

@@ -122,3 +122,71 @@ func sessionPrecedence() {
     let merged = ["token": "env-value"].merging(["token": "session-token"]) { _, new in new }
     #expect(merged["token"] == "session-token")
 }
+
+@MainActor
+@Test("assertion operators evaluate against responses")
+func assertionEvaluation() throws {
+    let body = Data(#"{"token": "abc123", "user": {"id": 7}}"#.utf8)
+    let headers: [(name: String, value: String)] = [("Content-Type", "application/json")]
+    let result = HTTPResult(
+        url: URL(string: "https://api.test")!,
+        status: 200,
+        headers: headers,
+        body: body,
+        elapsed: .milliseconds(120),
+        finalURL: URL(string: "https://api.test")!
+    )
+
+    func check(_ expression: String, _ op: String, _ value: String) -> Bool {
+        OpenCollectionDocument.evaluateAssertion(
+            OCAssertion(expression: expression, op: op, value: value, disabled: false),
+            response: result
+        ).pass
+    }
+
+    #expect(check("res.status", "eq", "200"))
+    #expect(!check("res.status", "eq", "404"))
+    #expect(check("res.status", "neq", "500"))
+    #expect(check("res.body.token", "eq", "abc123"))
+    #expect(check("res.body.token", "contains", "bc12"))
+    #expect(check("res.body.user.id", "gt", "5"))
+    #expect(check("res.body.user.id", "lt", "10"))
+    #expect(check("res.body.user.id", "isNumber", ""))
+    #expect(check("res.body.token", "isString", ""))
+    #expect(check("res.headers.content-type", "contains", "json"))
+    #expect(check("res.time", "lt", "5000"))
+    #expect(check("res.body.nope", "exists", "") == false)
+    #expect(check("res.body.nope", "notExists", ""))
+    #expect(check("res.status", "unknown-op", "200") == false)
+}
+
+@MainActor
+@Test("assertions round-trip and preserve runtime siblings")
+func assertionsRoundTrip() throws {
+    let doc = OpenCollectionDocument.sample()
+    _ = doc.addRequest(under: nil, snapshot: OCRequestSnapshot(
+        name: "Login",
+        method: "POST",
+        url: "https://api.test/login",
+        params: [],
+        headers: [],
+        bodyType: nil,
+        bodyData: "",
+        authKind: .none,
+        settings: OCSettings(followRedirects: nil, timeout: nil),
+        captures: [],
+        assertions: [OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false)],
+        docs: nil
+    ))
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gowa-assert-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("collection.yml")
+    try doc.save(to: file)
+    let text = try String(contentsOf: file, encoding: .utf8)
+    #expect(text.contains("assertions"))
+    #expect(text.contains("res.status"))
+
+    let loaded = try OpenCollectionDocument.load(from: file)
+    let snapshot = try #require(loaded.requestSnapshot(at: [0]))
+    #expect(snapshot.assertions == [OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false)])
+}

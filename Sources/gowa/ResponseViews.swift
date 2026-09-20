@@ -17,6 +17,10 @@ struct ResponseArea: View {
                 }
             } else if let result = app.result, let display = app.bodyDisplay {
                 VStack(spacing: 0) {
+                    if !app.lastAssertions.isEmpty {
+                        checksStrip
+                        Divider()
+                    }
                     if !app.lastCaptures.isEmpty {
                         capturedStrip
                         Divider()
@@ -36,6 +40,50 @@ struct ResponseArea: View {
 }
 
 extension ResponseArea {
+    @ViewBuilder
+    private var checksStrip: some View {
+        @Bindable var app = app
+        let failed = app.lastAssertions.contains { !$0.pass }
+        HStack(spacing: 10) {
+            Image(systemName: failed ? "xmark.seal" : "checkmark.seal")
+                .foregroundStyle(failed ? .red : .green)
+            Text(failed ? "Checks failed" : "Checks passed")
+                .font(.caption.weight(.medium))
+            ForEach(app.lastAssertions, id: \.expression) { outcome in
+                HStack(spacing: 4) {
+                    Image(systemName: outcome.pass ? "checkmark" : "xmark")
+                        .foregroundStyle(outcome.pass ? .green : .red)
+                        .font(.caption2)
+                    Text(outcome.expression)
+                        .font(.system(.caption, design: .monospaced))
+                    Text(outcome.op)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let expected = outcome.expected {
+                        Text("= \(expected)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let actual = outcome.actual {
+                        let actualColor: Color = outcome.pass ? .secondary : .red
+                        Text("got \(actual)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(actualColor)
+                            .lineLimit(1)
+                            .frame(maxWidth: 200, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(outcome.pass ? Color.green.opacity(0.10) : Color.red.opacity(0.12), in: Capsule())
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(failed ? Color.red.opacity(0.05) : Color.green.opacity(0.05))
+    }
+
     @ViewBuilder
     private var capturedStrip: some View {
         @Bindable var app = app

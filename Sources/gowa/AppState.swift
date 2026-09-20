@@ -59,6 +59,7 @@ final class AppState {
     /// never written to the collection file.
     var sessionVariables: [String: String] = [:]
     var lastCaptures: [(name: String, value: String, stored: Bool)] = []
+    var lastAssertions: [OpenCollectionDocument.AssertionOutcome] = []
 
     let history = HistoryStore()
     private let client = HTTPClient()
@@ -183,6 +184,7 @@ final class AppState {
         hasUnsavedChanges = false
         sessionVariables = [:]
         lastCaptures = []
+        lastAssertions = []
         selectedRequestPath = nil
         draft = nil
         result = nil
@@ -538,6 +540,7 @@ final class AppState {
         result = nil
         bodyDisplay = nil
         errorText = nil
+        lastAssertions = []
 
         var vars = resolution.values
         for (name, value) in sessionVariables {
@@ -558,6 +561,9 @@ final class AppState {
                 self.result = response
                 self.history.record(method: method, url: effective.url, body: effective.body, status: response.status)
                 self.runCaptures(for: snapshot, response: response)
+                self.lastAssertions = snapshot.assertions
+                    .filter { !$0.disabled }
+                    .map { OpenCollectionDocument.evaluateAssertion($0, response: response) }
                 let bodyText = String(data: response.body.prefix(16 << 20), encoding: .utf8) ?? ""
                 let display = await Task.detached(priority: .userInitiated) {
                     BodyDisplay.build(response, bodyText: bodyText)
@@ -610,6 +616,185 @@ final class AppState {
         doc.environments = envs
         environments = envs
         hasUnsavedChanges = true
+    }
+
+    // MARK: - Folder runner
+
+    struct AssertionOutcomeView: Identifiable, Sendable {
+        let id = UUID()
+        let expression: String
+        let op: String
+        let expected: String?
+        let actual: String?
+        let pass: Bool
+    }
+
+    struct RunnerEntry: Identifiable, Sendable {
+        enum State: Sendable { case pending, running, passed, failed, error, skipped }
+        let id: UUID
+        let path: NodePath
+        let name: String
+        let method: String
+        var state: State = .pending
+        var detail: String?
+        var elapsedText: String?
+        var outcomes: [AssertionOutcomeView] = []
+    }
+
+    @Observable
+    final class RunnerState: @unchecked Sendable {
+        var entries: [RunnerEntry] = []
+        var running = false
+        var cancelled = false
+        var passedCount = 0
+        var failedCount = 0
+        var errorCount = 0
+
+        var summary: String {
+            if running { return "\(passedCount) passed · \(failedCount) failed · running…" }
+            return "\(passedCount) passed · \(failedCount) failed · \(errorCount) errors"
+        }
+    }
+
+    let runner = RunnerState()
+    var showingRunner = false
+    private var runnerSkipRemaining = false
+
+    /// Depth-first requests under `path` (nil = whole collection), in tree order.
+    func runnerRequests(under path: NodePath?) -> [NodePath] {
+        guard let doc = document else { return [] }
+        let prefix = path ?? []
+        return doc.enumerate()
+            .filter { !$0.isFolder }
+            .map(\.path)
+            .filter { $0.count > prefix.count && Array($0.prefix(prefix.count)) == prefix }
+    }
+
+    func startRunner(under path: NodePath?) {
+        guard let doc = document, !runner.running else { return }
+        let paths = runnerRequests(under: path)
+        guard !paths.isEmpty else {
+            statusMessage = "Nothing to run — the folder has no requests"
+            return
+        }
+
+        runner.entries = paths.map { nodePath in
+            let node = doc.enumerate().first { $0.path == nodePath }
+            return RunnerEntry(
+                id: UUID(),
+                path: nodePath,
+                name: node?.name ?? "Untitled",
+                method: node?.method ?? "GET"
+            )
+        }
+        runner.running = true
+        runner.cancelled = false
+        runner.passedCount = 0
+        runner.failedCount = 0
+        runner.errorCount = 0
+        showingRunner = true
+
+        Task { await runSequence(paths) }
+    }
+
+    func stopRunner() {
+        runner.cancelled = true
+        runnerSkipRemaining = true
+    }
+
+    private func runSequence(_ paths: [NodePath]) async {
+        runnerSkipRemaining = false
+        let vars = effectiveVariablesWithSession()
+        for index in paths.indices {
+            if runnerSkipRemaining {
+                runner.entries[index].state = .skipped
+                continue
+            }
+            runner.entries[index].state = .running
+            let outcome = await runOne(at: paths[index], variables: vars)
+            runner.entries[index].state = outcome.state
+            runner.entries[index].detail = outcome.detail
+            runner.entries[index].elapsedText = outcome.elapsedText
+            runner.entries[index].outcomes = outcome.outcomes
+            switch outcome.state {
+            case .passed: runner.passedCount += 1
+            case .failed: runner.failedCount += 1
+            case .error: runner.errorCount += 1
+            default: break
+            }
+        }
+        runner.running = false
+    }
+
+    private func effectiveVariablesWithSession() -> [String: String] {
+        var vars = document?.resolveVariables(in: activeEnvironment).values ?? [:]
+        for (name, value) in sessionVariables {
+            vars[name] = value // session captures win; chaining works inside a run
+        }
+        return vars
+    }
+
+    private struct SingleRunOutcome {
+        var state: RunnerEntry.State
+        var detail: String?
+        var elapsedText: String?
+        var outcomes: [AssertionOutcomeView]
+    }
+
+    private func runOne(at path: NodePath, variables: [String: String]) async -> SingleRunOutcome {
+        guard let doc = document, var snapshot = doc.requestSnapshot(at: path) else {
+            return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
+        }
+        let effective = Self.effectiveRequest(from: snapshot, variables: variables)
+        let method = HTTPMethod(rawValue: effective.method) ?? .GET
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        do {
+            let client = HTTPClient(followRedirects: effective.followRedirects)
+            let response = try await client.send(
+                method: method,
+                urlText: effective.url,
+                body: effective.body,
+                headers: effective.headers
+            )
+            let elapsed = start.duration(to: clock.now)
+            let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
+            let elapsedText = String(format: "%.0f ms", ms)
+
+            runCaptures(for: snapshot, response: response)
+            snapshot.captures.forEach { _ in } // captures already in sessionVariables
+
+            let outcomes = snapshot.assertions
+                .filter { !$0.disabled }
+                .map { assertion -> AssertionOutcomeView in
+                    let outcome = OpenCollectionDocument.evaluateAssertion(assertion, response: response)
+                    return AssertionOutcomeView(
+                        expression: outcome.expression,
+                        op: outcome.op,
+                        expected: outcome.expected,
+                        actual: outcome.actual,
+                        pass: outcome.pass
+                    )
+                }
+            let failed = outcomes.contains { !$0.pass }
+            let detail = "HTTP \(response.status)"
+            return SingleRunOutcome(
+                state: failed ? .failed : .passed,
+                detail: detail,
+                elapsedText: elapsedText,
+                outcomes: outcomes
+            )
+        } catch {
+            let elapsed = start.duration(to: clock.now)
+            let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
+            return SingleRunOutcome(
+                state: .error,
+                detail: error.localizedDescription,
+                elapsedText: String(format: "%.0f ms", ms),
+                outcomes: []
+            )
+        }
     }
 
     struct EffectiveRequest: Sendable {
