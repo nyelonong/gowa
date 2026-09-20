@@ -24,8 +24,6 @@ const colors = struct {
     const danger = ui.Color.rgb8(240, 97, 108);
 };
 
-const preview_cap = 2048;
-
 var state = AppState{};
 
 const App = gooey.App(AppState, &state, render, .{
@@ -130,7 +128,13 @@ const StatusLine = struct {
                 .color = colors.danger,
             }));
         } else if (s.status_code) |code| {
-            cx.render(ui.textFmt("HTTP {d} · {d} bytes", .{ code, s.pending_body_len }, .{
+            var size_buf: [16]u8 = undefined;
+            const st: std.http.Status = @enumFromInt(code);
+            cx.render(ui.textFmt("HTTP {d} {s} · {s}", .{
+                code,
+                st.phrase() orelse "",
+                state_mod.formatBytes(&size_buf, s.pending_body_len),
+            }, .{
                 .size = 13,
                 .color = if (code < 400) colors.accent else colors.danger,
             }));
@@ -146,24 +150,108 @@ const StatusLine = struct {
 const ResponseView = struct {
     pub fn render(_: @This(), cx: *Cx) void {
         const s = cx.state(AppState);
-        if (s.busy or s.pending_body_len == 0) return;
-
-        const preview_len = @min(s.pending_body_len, preview_cap);
+        if (s.busy or s.status_code == null) return;
 
         cx.render(ui.box(.{
             .fill_width = true,
             .direction = .column,
             .padding = .{ .all = 12 },
+            .gap = 10,
             .background = colors.card,
             .corner_radius = 10,
         }, .{
+            HeaderRow{},
             ui.scroll("response-scroll", .{ .height = 380 }, .{
-                ui.text(s.pending_body_buf[0..preview_len], .{
-                    .size = 13,
-                    .color = colors.text,
-                    .wrap = .newlines,
-                }),
+                HeadersBlock{},
+                BodyBlock{},
+                TruncatedNote{},
             }),
+        }));
+    }
+};
+
+const HeaderRow = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+
+        cx.render(ui.hstack(.{ .gap = 8, .alignment = .center }, .{
+            ui.text("Response", .{
+                .size = 12,
+                .weight = .medium,
+                .color = colors.muted,
+            }),
+            ui.spacer(),
+            Button{
+                .label = "Copy body",
+                .variant = .secondary,
+                .size = .small,
+                .enabled = s.pending_body_len > 0 and AppState.isText(s.pending_body_buf[0..s.pending_body_len]),
+                .on_click_handler = cx.command(AppState.copyBody),
+            },
+        }));
+    }
+};
+
+const HeadersBlock = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+        if (s.pending_headers_len == 0) return;
+
+        cx.render(ui.box(.{
+            .fill_width = true,
+            .direction = .column,
+            .gap = 4,
+        }, .{
+            ui.text("Headers", .{
+                .size = 12,
+                .weight = .medium,
+                .color = colors.muted,
+            }),
+            ui.text(s.pending_headers_buf[0..s.pending_headers_len], .{
+                .size = 12,
+                .color = colors.text,
+                .wrap = .newlines,
+            }),
+        }));
+    }
+};
+
+const BodyBlock = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+        if (s.pending_body_len == 0) return;
+
+        const full = s.pending_body_buf[0..s.pending_body_len];
+        if (!AppState.isText(full)) {
+            cx.render(ui.textFmt("{d} bytes (binary)", .{full.len}, .{
+                .size = 13,
+                .color = colors.muted,
+            }));
+            return;
+        }
+
+        const preview = full[0..@min(full.len, state_mod.preview_cap)];
+        cx.render(ui.text(preview, .{
+            .size = 13,
+            .color = colors.text,
+            .wrap = .newlines,
+        }));
+    }
+};
+
+const TruncatedNote = struct {
+    pub fn render(_: @This(), cx: *Cx) void {
+        const s = cx.state(AppState);
+        if (s.pending_body_len <= state_mod.preview_cap) return;
+
+        var shown_buf: [16]u8 = undefined;
+        var total_buf: [16]u8 = undefined;
+        cx.render(ui.textFmt("truncated — showing first {s} of {s}", .{
+            state_mod.formatBytes(&shown_buf, state_mod.preview_cap),
+            state_mod.formatBytes(&total_buf, s.pending_body_len),
+        }, .{
+            .size = 12,
+            .color = colors.muted,
         }));
     }
 };
