@@ -55,6 +55,13 @@ enum OAuthKind: Equatable, Sendable {
     case preserved // any other spec auth type: kept as-is in the document
 }
 
+struct OCCapture: Equatable, Sendable {
+    var variableName: String
+    var expression: String // spec jsonq selector, e.g. $.access_token
+    var scope: String // "runtime" (session) | "environment" (persisted)
+    var disabled: Bool
+}
+
 struct OCSettings: Equatable, Sendable {
     var followRedirects: Bool?
     var timeout: Int?
@@ -70,6 +77,7 @@ struct OCRequestSnapshot: Sendable {
     var bodyData: String
     var authKind: OAuthKind
     var settings: OCSettings
+    var captures: [OCCapture] = []
     var docs: String?
 }
 
@@ -295,6 +303,7 @@ final class OpenCollectionDocument {
             "info": ["name": snapshot.name, "type": "http"],
             "http": buildHTTP(snapshot, preserving: [:]),
         ]
+        writeCaptures(snapshot.captures, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs }
         return append(item, under: parent)
     }
@@ -384,8 +393,30 @@ final class OpenCollectionDocument {
                 followRedirects: settings["followRedirects"] as? Bool,
                 timeout: settings["timeout"] as? Int
             ),
+            captures: Self.readCaptures(item),
             docs: item["docs"] as? String
         )
+    }
+
+    private static func readCaptures(_ item: [String: Any]) -> [OCCapture] {
+        let runtime = item["runtime"] as? [String: Any] ?? [:]
+        guard let actions = runtime["actions"] as? [[String: Any]] else { return [] }
+        return actions.compactMap { action in
+            guard action["type"] as? String == "set-variable",
+                  let selector = action["selector"] as? [String: Any],
+                  let expression = selector["expression"] as? String,
+                  let variable = action["variable"] as? [String: Any],
+                  let name = variable["name"] as? String
+            else { return nil }
+            let phase = action["phase"] as? String ?? "after-response"
+            guard phase == "after-response" else { return nil } // other phases preserved, not executed
+            return OCCapture(
+                variableName: name,
+                expression: expression,
+                scope: variable["scope"] as? String ?? "runtime",
+                disabled: action["disabled"] as? Bool ?? false
+            )
+        }
     }
 
     /// Body handling: raw families carry `data`; graphql carries `query`.
@@ -402,8 +433,39 @@ final class OpenCollectionDocument {
         item["info"] = info
 
         item["http"] = buildHTTP(snapshot, preserving: item)
+        writeCaptures(snapshot.captures, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs } else { item.removeValue(forKey: "docs") }
         write(item, at: path)
+    }
+
+    /// Writes after-response set-variable captures into `runtime.actions`,
+    /// preserving any other actions and runtime sections (scripts,
+    /// assertions, variables) untouched.
+    private func writeCaptures(_ captures: [OCCapture], into item: inout [String: Any], preserving current: [String: Any]) {
+        var runtime = current["runtime"] as? [String: Any] ?? [:]
+        var actions = runtime["actions"] as? [[String: Any]] ?? []
+
+        let otherActions = actions.filter { ($0["type"] as? String) != "set-variable" || (($0["phase"] as? String) ?? "after-response") != "after-response" }
+        var ours: [[String: Any]] = []
+        for capture in captures where !capture.variableName.isEmpty && !capture.expression.isEmpty {
+            ours.append([
+                "type": "set-variable",
+                "phase": "after-response",
+                "selector": ["method": "jsonq", "expression": capture.expression],
+                "variable": ["name": capture.variableName, "scope": capture.scope],
+                "disabled": capture.disabled,
+            ])
+        }
+        if otherActions.isEmpty && ours.isEmpty {
+            runtime.removeValue(forKey: "actions")
+        } else {
+            runtime["actions"] = otherActions + ours
+        }
+        if runtime.isEmpty {
+            item.removeValue(forKey: "runtime")
+        } else {
+            item["runtime"] = runtime
+        }
     }
 
     private func buildHTTP(_ snapshot: OCRequestSnapshot, preserving item: [String: Any]) -> [String: Any] {
@@ -522,6 +584,60 @@ final class OpenCollectionDocument {
     }
 
     // MARK: Interpolation
+
+    /// Evaluate a spec jsonq selector (e.g. `$.data.token`, `$.items[0].id`)
+    /// against a JSON body. Returns nil when the path misses or the body
+    /// isn't JSON.
+    nonisolated static func evaluateCapture(_ expression: String, body: Data) -> String? {
+        let trimmed = expression.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("$") else { return nil }
+        let path = String(trimmed.dropFirst()).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !path.isEmpty else {
+            // `$` alone = the whole document
+            guard let object = try? JSONSerialization.jsonObject(with: body) else { return nil }
+            return Self.scalarString(object) ?? (String(data: body, encoding: .utf8))
+        }
+
+        var components: [String] = []
+        for raw in path.split(separator: ".").flatMap({ Self.expandIndex($0) }) {
+            components.append(raw)
+        }
+
+        guard var current: Any = try? JSONSerialization.jsonObject(with: body) else { return nil }
+        for component in components {
+            if component.hasPrefix("[") && component.hasSuffix("]") {
+                guard let index = Int(component.dropFirst().dropLast()),
+                      let array = current as? [Any],
+                      array.indices.contains(index)
+                else { return nil }
+                current = array[index]
+            } else {
+                guard let dictionary = current as? [String: Any],
+                      let value = dictionary[component]
+                else { return nil }
+                current = value
+            }
+        }
+        return Self.scalarString(current)
+    }
+
+    private nonisolated static func expandIndex(_ component: Substring) -> [String] {
+        // "items[0]" → ["items", "[0]"]; "[0]" stays as-is.
+        guard let open = component.firstIndex(of: "[") else { return [String(component)] }
+        let name = String(component[..<open])
+        let bracket = String(component[open...])
+        return name.isEmpty ? [bracket] : [name, bracket]
+    }
+
+    private nonisolated static func scalarString(_ value: Any) -> String? {
+        switch value {
+        case let string as String: return string
+        case let bool as Bool: return bool ? "true" : "false"
+        case let number as NSNumber: return number.stringValue
+        case is NSNull: return nil
+        default: return nil
+        }
+    }
 
     /// Substitute `{{name}}` placeholders; unknown variables stay literal.
     nonisolated static func interpolate(_ template: String, _ variables: [String: String]) -> String {

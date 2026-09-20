@@ -55,6 +55,7 @@ private struct EditorContent: View {
         case headers = "Headers"
         case auth = "Auth"
         case body = "Body"
+        case captures = "Captures"
         case settings = "Settings"
         var id: String { rawValue }
     }
@@ -155,6 +156,7 @@ private struct EditorContent: View {
             case .headers: HeaderRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .auth: AuthSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .body: BodySection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
+            case .captures: CaptureRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             case .settings: SettingsSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             }
         }
@@ -550,6 +552,89 @@ struct BodySection: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
+    }
+}
+
+// MARK: - Captures
+
+struct CaptureRows: View {
+    let app: AppState
+    let draft: OCRequestSnapshot
+    let commit: RequestCommitter
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("After this response, values are extracted and stored for the next requests. Runtime scope stays in memory only — never saved to the collection file.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(draft.captures.indices, id: \.self) { index in
+                HStack(spacing: 6) {
+                    Toggle("", isOn: Binding(
+                        get: { !draft.captures[index].disabled },
+                        set: { enabled in update { snapshot in snapshot.captures[index].disabled = !enabled } }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+
+                    TextField("{{variable}}", text: Binding(
+                        get: { draft.captures[index].variableName },
+                        set: { newName in update { snapshot in snapshot.captures[index].variableName = newName } }
+                    ))
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 140)
+
+                    Text("from")
+                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+
+                    TextField("$.access_token", text: Binding(
+                        get: { draft.captures[index].expression },
+                        set: { newExpression in update { snapshot in snapshot.captures[index].expression = newExpression } }
+                    ))
+                    .font(.system(.callout, design: .monospaced))
+
+                    Picker("", selection: Binding(
+                        get: { draft.captures[index].scope },
+                        set: { newScope in update { snapshot in snapshot.captures[index].scope = newScope } }
+                    )) {
+                        Text("Runtime").tag("runtime")
+                        Text("Environment").tag("environment")
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+
+                    Button {
+                        update { snapshot in snapshot.captures.remove(at: index) }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Button {
+                update { snapshot in
+                    snapshot.captures.append(OCCapture(
+                        variableName: "",
+                        expression: "$.",
+                        scope: "runtime",
+                        disabled: false
+                    ))
+                }
+            } label: {
+                Label("Add capture", systemImage: "plus.circle")
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+    }
+
+    private func update(_ change: (inout OCRequestSnapshot) -> Void) {
+        commit(change)
     }
 }
 

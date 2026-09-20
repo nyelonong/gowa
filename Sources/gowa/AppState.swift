@@ -54,6 +54,12 @@ final class AppState {
     var bodyDisplay: BodyDisplay?
     var errorText: String?
 
+    /// Values captured from responses (e.g. OAuth tokens). Session-scoped:
+    /// they override environment variables during interpolation and are
+    /// never written to the collection file.
+    var sessionVariables: [String: String] = [:]
+    var lastCaptures: [(name: String, value: String, stored: Bool)] = []
+
     let history = HistoryStore()
     private let client = HTTPClient()
 
@@ -175,6 +181,8 @@ final class AppState {
         document = doc
         rememberCurrentCollection()
         hasUnsavedChanges = false
+        sessionVariables = [:]
+        lastCaptures = []
         selectedRequestPath = nil
         draft = nil
         result = nil
@@ -531,7 +539,11 @@ final class AppState {
         bodyDisplay = nil
         errorText = nil
 
-        let effective = Self.effectiveRequest(from: snapshot, variables: resolution.values)
+        var vars = resolution.values
+        for (name, value) in sessionVariables {
+            vars[name] = value // session captures win over environment values
+        }
+        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
         let method = HTTPMethod(rawValue: effective.method) ?? .GET
 
         Task {
@@ -545,6 +557,7 @@ final class AppState {
                 )
                 self.result = response
                 self.history.record(method: method, url: effective.url, body: effective.body, status: response.status)
+                self.runCaptures(for: snapshot, response: response)
                 let bodyText = String(data: response.body.prefix(16 << 20), encoding: .utf8) ?? ""
                 let display = await Task.detached(priority: .userInitiated) {
                     BodyDisplay.build(response, bodyText: bodyText)
@@ -556,6 +569,47 @@ final class AppState {
             }
             self.busy = false
         }
+    }
+
+    private func runCaptures(for snapshot: OCRequestSnapshot, response: HTTPResult) {
+        var captured: [(name: String, value: String, stored: Bool)] = []
+        for capture in snapshot.captures where !capture.disabled {
+            guard let value = OpenCollectionDocument.evaluateCapture(capture.expression, body: response.body) else {
+                captured.append((capture.variableName, "<not found>", false))
+                continue
+            }
+            sessionVariables[capture.variableName] = value
+            let stored: Bool
+            if capture.scope == "environment" {
+                persistToEnvironment(name: capture.variableName, value: value)
+                stored = true
+            } else {
+                stored = false
+            }
+            captured.append((capture.variableName, value, stored))
+        }
+        if !captured.isEmpty {
+            lastCaptures = captured
+        }
+    }
+
+    /// Environment-scope captures write through to the in-memory document
+    /// (and thus the YAML on save). Choose this scope only for values that
+    /// belong in the file.
+    private func persistToEnvironment(name: String, value: String) {
+        guard let doc = document, let envName = activeEnvironment else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { $0.name == envName }) else { return }
+        var variables = envs[index].variables
+        if let position = variables.firstIndex(where: { $0.name == name }) {
+            variables[position].value = value
+        } else {
+            variables.append(OCVariable(name: name, value: value, secret: false, disabled: false))
+        }
+        envs[index].variables = variables
+        doc.environments = envs
+        environments = envs
+        hasUnsavedChanges = true
     }
 
     struct EffectiveRequest: Sendable {

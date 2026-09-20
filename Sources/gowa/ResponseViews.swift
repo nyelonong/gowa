@@ -16,7 +16,13 @@ struct ResponseArea: View {
                     Text(error)
                 }
             } else if let result = app.result, let display = app.bodyDisplay {
-                ResponseView(app: app, result: result, display: display)
+                VStack(spacing: 0) {
+                    if !app.lastCaptures.isEmpty {
+                        capturedStrip
+                        Divider()
+                    }
+                    ResponseView(app: app, result: result, display: display)
+                }
             } else {
                 ContentUnavailableView(
                     "Gowa",
@@ -26,6 +32,46 @@ struct ResponseArea: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+extension ResponseArea {
+    @ViewBuilder
+    private var capturedStrip: some View {
+        @Bindable var app = app
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.doc")
+                .foregroundStyle(.green)
+            Text("Captured")
+                .font(.caption.weight(.medium))
+            ForEach(app.lastCaptures, id: \.name) { capture in
+                HStack(spacing: 4) {
+                    Text("{{\(capture.name)}}")
+                        .font(.system(.caption, design: .monospaced).weight(.medium))
+                    Text("= \(capture.value)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(capture.value == "<not found>" ? .red : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 260, alignment: .leading)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(capture.stored ? Color.orange.opacity(0.12) : Color.green.opacity(0.12), in: Capsule())
+                .help(capture.stored ? "Stored into the active environment (persisted on save)" : "Stored in session memory — not saved to the collection file")
+            }
+            Spacer()
+            Button("Clear") {
+                app.sessionVariables = [:]
+                app.lastCaptures = []
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color.green.opacity(0.05))
     }
 }
 
