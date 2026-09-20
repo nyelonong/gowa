@@ -625,13 +625,19 @@ final class OpenCollectionDocument {
     /// against a JSON body. Returns nil when the path misses or the body
     /// isn't JSON.
     nonisolated static func evaluateCapture(_ expression: String, body: Data) -> String? {
+        guard let value = evaluateCaptureValue(expression, body: body) else { return nil }
+        return scalarString(value) ?? String(data: body, encoding: .utf8)
+    }
+
+    /// Full-fidelity variant: returns dictionaries/arrays too, so `exists`
+    /// checks work for object values.
+    nonisolated static func evaluateCaptureValue(_ expression: String, body: Data) -> Any? {
         let trimmed = expression.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("$") else { return nil }
         let path = String(trimmed.dropFirst()).trimmingCharacters(in: CharacterSet(charactersIn: "."))
         guard !path.isEmpty else {
             // `$` alone = the whole document
-            guard let object = try? JSONSerialization.jsonObject(with: body) else { return nil }
-            return Self.scalarString(object) ?? (String(data: body, encoding: .utf8))
+            return try? JSONSerialization.jsonObject(with: body)
         }
 
         var components: [String] = []
@@ -654,7 +660,7 @@ final class OpenCollectionDocument {
                 current = value
             }
         }
-        return Self.scalarString(current)
+        return current
     }
 
     private nonisolated static func expandIndex(_ component: Substring) -> [String] {
@@ -702,7 +708,8 @@ final class OpenCollectionDocument {
             actual = String(data: response.body, encoding: .utf8)
         } else if expression.hasPrefix("res.body.") {
             let path = String(expression.dropFirst("res.body.".count))
-            actual = evaluateCapture("$." + path, body: response.body)
+            let raw = evaluateCaptureValue("$." + path, body: response.body)
+            actual = raw.flatMap { scalarString($0) } ?? (raw != nil ? "<non-scalar>" : nil)
         } else if expression.hasPrefix("res.headers.") {
             let name = String(expression.dropFirst("res.headers.".count)).lowercased()
             actual = response.headers.first { $0.name.lowercased() == name }?.value

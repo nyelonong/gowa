@@ -36,6 +36,25 @@ scripts/make-app.sh      # Gowa.app bundle (ad-hoc signed)
 scripts/make-app.sh --open
 ```
 
+## CLI
+
+The same binary doubles as a headless collection runner for CI:
+
+```sh
+# from a release build
+.build/release/gowa run ~/path/to/collection.yml --env Production
+
+# or via the app bundle
+Gowa.app/Contents/MacOS/gowa run collection.yml
+
+# only requests whose name contains "Users"
+gowa run collection.yml --filter Users
+```
+
+Runs every request top-to-bottom with `{{variables}}`, captures (chained
+tokens flow between requests), and checks. Exit codes: `0` all passed,
+`1` failures, `2` usage error — CI-friendly.
+
 ## Tests
 
 ```sh

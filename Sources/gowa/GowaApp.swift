@@ -1,6 +1,23 @@
 import SwiftUI
 
+/// Entry point: dispatches between the headless CLI (`gowa run …`) and the
+/// GUI app.
 @main
+struct GowaEntry {
+    static func main() async {
+        let arguments = CommandLine.arguments
+        if arguments.count > 1, arguments[1] == "run" {
+            await CLIMode.run(Array(arguments.dropFirst(2)))
+            return
+        }
+        if arguments.count > 1, arguments[1] == "--help" || arguments[1] == "-h" {
+            CLIMode.printUsage()
+            return
+        }
+        GowaApp.main()
+    }
+}
+
 struct GowaApp: App {
     @State private var app = AppState()
 
