@@ -600,3 +600,5 @@ final class AppState {
         return cleaned.isEmpty ? "collection" : cleaned
     }
 }
+
+
