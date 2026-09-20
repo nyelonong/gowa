@@ -13,14 +13,17 @@ struct ContentView: View {
         .frame(minWidth: 960, minHeight: 620)
     }
 
-    @ViewBuilder
     private var detail: some View {
-        if app.document == nil {
-            welcome
-        } else {
+        Group {
+            if app.document == nil {
+                welcome
+            } else {
             VStack(spacing: 0) {
                 if !app.environments.isEmpty {
                     environmentBar
+                }
+                if !app.missingSecrets.isEmpty {
+                    missingSecretsBar
                 }
                 RequestEditor(app: app)
                 if app.draft != nil {
@@ -29,6 +32,28 @@ struct ContentView: View {
                 }
             }
         }
+        }
+        .sheet(isPresented: Binding(
+            get: { app.showingEnvironmentManager },
+            set: { app.showingEnvironmentManager = $0 }
+        )) {
+            EnvironmentsSheet(app: app)
+        }
+    }
+
+    private var missingSecretsBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.slash")
+                .foregroundStyle(.orange)
+            Text("Secret not stored: \(app.missingSecrets.joined(separator: ", ")) — sends will fail until it is set")
+                .font(.callout)
+            Button("Set it") { app.showingEnvironmentManager = true }
+                .controlSize(.small)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(.orange.opacity(0.08))
     }
 
     private var welcome: some View {
@@ -83,9 +108,13 @@ struct ContentView: View {
             .labelsHidden()
             .frame(width: 200)
 
-            Image(systemName: "curlybraces")
-                .foregroundStyle(.tertiary)
-                .help("Variables of the active environment substitute {{name}} placeholders")
+            Button {
+                app.showingEnvironmentManager = true
+            } label: {
+                Label("Environments", systemImage: "slider.horizontal.3")
+            }
+            .controlSize(.small)
+            .help("Manage environments and variables")
             Spacer()
         }
         .padding(.horizontal, 16)

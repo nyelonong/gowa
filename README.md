@@ -18,6 +18,10 @@ files you can keep in git.
   spec auth types (OAuth2, AWS, digest…) are preserved exactly in the YAML.
 - **Environments & variables** — `{{name}}` placeholders interpolate into
   URLs, params, headers, bodies, and auth from the active environment.
+- **Secrets stay out of git** — mark a variable as Secret and its value is
+  stored in the macOS Keychain; the collection file only ever contains the
+  variable name. (Tip: keep credentials in secret variables and reference
+  them as `{{token}}` in auth fields — never inline.)
 - JSON response highlighting, native TextKit viewer, timing/size readout,
   request history (`⌘K` clears), `⌘↩` to send.
 

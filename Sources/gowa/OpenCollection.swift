@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Yams
 
@@ -126,8 +127,87 @@ final class OpenCollectionDocument {
 
     func save(to url: URL) throws {
         self.url = url
-        let text = try Yams.dump(object: root, sortKeys: true)
+        _ = documentID // ensure the stable id exists before the output copy
+        var output = root
+        stripSecretsForSave(into: &output)
+        let text = try Yams.dump(object: output, sortKeys: true)
         try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Secret values are stored in the macOS Keychain and stripped from the
+    /// written YAML — the committed file contains variable names only.
+    private func stripSecretsForSave(into output: inout [String: Any]) {
+        guard var config = output["config"] as? [String: Any],
+              let environments = config["environments"] as? [[String: Any]]
+        else { return }
+
+        var updated: [[String: Any]] = []
+        for var environment in environments {
+            let envName = environment["name"] as? String ?? ""
+            if var variables = environment["variables"] as? [[String: Any]] {
+                for index in variables.indices {
+                    guard variables[index]["secret"] as? Bool == true,
+                          let value = variables[index]["value"] as? String,
+                          !value.isEmpty
+                    else { continue }
+                    let name = variables[index]["name"] as? String ?? ""
+                    Keychain.setValue(value, account: secretAccount(env: envName, variable: name))
+                    variables[index]["value"] = ""
+                }
+                environment["variables"] = variables
+            }
+            updated.append(environment)
+        }
+        config["environments"] = updated
+        output["config"] = config
+    }
+
+    // MARK: - Secret accounts
+
+    /// Stable identity for keychain accounts: lives under the spec's
+    /// `extensions` block so it survives file renames and moves.
+    var documentID: String {
+        var extensions = root["extensions"] as? [String: Any] ?? [:]
+        var gowa = extensions["gowa"] as? [String: Any] ?? [:]
+        if let existing = gowa["id"] as? String, !existing.isEmpty {
+            return existing
+        }
+        let fresh = UUID().uuidString
+        gowa["id"] = fresh
+        extensions["gowa"] = gowa
+        root["extensions"] = extensions
+        return fresh
+    }
+
+    func secretAccount(env: String, variable: String) -> String {
+        "\(documentID).\(env).\(variable)"
+    }
+
+    /// Resolves the active environment into interpolation values. Secret
+    /// variables read from the Keychain; values imported from YAML still
+    /// work until the next save migrates them. `missingSecrets` lists secret
+    /// variables with no stored value.
+    func resolveVariables(in environmentName: String?) -> (values: [String: String], missingSecrets: [String]) {
+        guard let environmentName,
+              let environment = environments.first(where: { $0.name == environmentName })
+        else { return ([:], []) }
+
+        var values: [String: String] = [:]
+        var missing: [String] = []
+        for variable in environment.variables where !variable.disabled && !variable.name.isEmpty {
+            if variable.secret {
+                if let stored = Keychain.value(account: secretAccount(env: environment.name, variable: variable.name)) {
+                    values[variable.name] = stored
+                } else if !variable.value.isEmpty {
+                    values[variable.name] = variable.value
+                } else {
+                    missing.append(variable.name)
+                }
+            } else {
+                values[variable.name] = variable.value
+            }
+        }
+        return (values, missing)
     }
 
     // MARK: Info

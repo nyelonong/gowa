@@ -38,6 +38,12 @@ final class AppState {
     // Environment
     var activeEnvironment: String?
     var environments: [OCEnvironmentSnapshot] = []
+    var showingEnvironmentManager = false
+
+    /// Secret variables of the active environment with no stored value.
+    var missingSecrets: [String] {
+        document?.resolveVariables(in: activeEnvironment).missingSecrets ?? []
+    }
 
     // Send state
     var busy = false
@@ -49,7 +55,6 @@ final class AppState {
     private let client = HTTPClient()
 
     var canSend: Bool { draft != nil && !busy }
-
     // MARK: - Collection lifecycle
 
     func newCollection() {
@@ -287,17 +292,123 @@ final class AppState {
         return "\(base) \(n)"
     }
 
+    // MARK: - Environment management
+
+    func refreshEnvironments() {
+        guard let doc = document else { return }
+        environments = doc.environments
+        if let active = activeEnvironment, !environments.contains(where: { $0.name == active }) {
+            activeEnvironment = environments.first?.name
+        }
+        rebuildSidebar()
+    }
+
+    func addEnvironment() {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        var n = envs.count + 1
+        while envs.contains(where: { $0.name == "Environment \(n)" }) { n += 1 }
+        envs.append(OCEnvironmentSnapshot(name: "Environment \(n)", variables: []))
+        doc.environments = envs
+        hasUnsavedChanges = true
+        refreshEnvironments()
+    }
+
+    func deleteEnvironment(_ name: String) {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { $0.name == name }) else { return }
+        for variable in envs[index].variables where variable.secret {
+            Keychain.removeValue(account: doc.secretAccount(env: name, variable: variable.name))
+        }
+        envs.remove(at: index)
+        doc.environments = envs
+        hasUnsavedChanges = true
+        refreshEnvironments()
+    }
+
+    func updateEnvironment(_ environment: OCEnvironmentSnapshot, previousName: String?) {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { previousName == nil ? $0.name == environment.name : $0.name == previousName }) else { return }
+        if let previousName, previousName != environment.name {
+            // Renamed: move secret values to the new account.
+            for variable in envs[index].variables where variable.secret {
+                if let value = Keychain.value(account: doc.secretAccount(env: previousName, variable: variable.name)) {
+                    Keychain.setValue(value, account: doc.secretAccount(env: environment.name, variable: variable.name))
+                    Keychain.removeValue(account: doc.secretAccount(env: previousName, variable: variable.name))
+                }
+            }
+        }
+        envs[index] = environment
+        doc.environments = envs
+        hasUnsavedChanges = true
+        if activeEnvironment == previousName { activeEnvironment = environment.name }
+        refreshEnvironments()
+    }
+
+    func setVariable(_ variable: OCVariable, in environmentName: String, previousName: String?) {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { $0.name == environmentName }) else { return }
+        if let previousName, previousName != variable.name,
+           let old = envs[index].variables.first(where: { $0.name == previousName }), old.secret {
+            if let value = Keychain.value(account: doc.secretAccount(env: environmentName, variable: previousName)) {
+                Keychain.setValue(value, account: doc.secretAccount(env: environmentName, variable: variable.name))
+                Keychain.removeValue(account: doc.secretAccount(env: previousName, variable: previousName))
+            }
+        }
+        if let position = envs[index].variables.firstIndex(where: { previousName == nil ? $0.name == variable.name : $0.name == previousName }) {
+            envs[index].variables[position] = variable
+        } else {
+            envs[index].variables.append(variable)
+        }
+        doc.environments = envs
+        hasUnsavedChanges = true
+        refreshEnvironments()
+    }
+
+    func deleteVariable(_ name: String, in environmentName: String) {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { $0.name == environmentName }) else { return }
+        if let variable = envs[index].variables.first(where: { $0.name == name }), variable.secret {
+            Keychain.removeValue(account: doc.secretAccount(env: environmentName, variable: name))
+        }
+        envs[index].variables.removeAll { $0.name == name }
+        doc.environments = envs
+        hasUnsavedChanges = true
+        refreshEnvironments()
+    }
+
+    /// Keychain-backed value for a secret variable, if stored.
+    func storedSecretValue(environment: String, variable: String) -> String? {
+        guard let doc = document else { return nil }
+        return Keychain.value(account: doc.secretAccount(env: environment, variable: variable))
+    }
+
+    func storeSecretValue(_ value: String, environment: String, variable: String) {
+        guard let doc = document else { return }
+        Keychain.setValue(value, account: doc.secretAccount(env: environment, variable: variable))
+    }
+
     // MARK: - Send
 
     func send() {
         guard !busy, let snapshot = draft else { return }
+        let resolution = document?.resolveVariables(in: activeEnvironment) ?? (values: [:], missingSecrets: [])
+        let missing = resolution.missingSecrets
+        if !missing.isEmpty {
+            let names = missing.map { "\"\($0)\"" }.joined(separator: ", ")
+            errorText = "Secret \(names) has no stored value. Open Environments to set it — secret values live in the macOS Keychain, never in the collection file."
+            return
+        }
         busy = true
         result = nil
         bodyDisplay = nil
         errorText = nil
 
-        let vars = document?.variables(in: activeEnvironment) ?? [:]
-        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
+        let effective = Self.effectiveRequest(from: snapshot, variables: resolution.values)
         let method = HTTPMethod(rawValue: effective.method) ?? .GET
 
         Task {
