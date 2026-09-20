@@ -38,7 +38,7 @@ struct CurlImportSheet: View {
                                 .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .frame(width: 380)
+                        .frame(width: 420)
     .frame(minHeight: 220)
                         .onAppear { command = NSPasteboard.general.string(forType: .string) ?? "" }
                 }
@@ -110,8 +110,9 @@ struct CurlImportSheet: View {
                                 .background(.blue, in: RoundedRectangle(cornerRadius: 5))
                             Text(result.url)
                                 .font(.system(.callout, design: .monospaced))
-                                .lineLimit(2)
+                                .lineLimit(3)
                                 .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         if !result.params.isEmpty {
@@ -139,7 +140,7 @@ struct CurlImportSheet: View {
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: .infinity)
+                .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Text("Paste a curl command — the parsed request preview appears here.")
                     .font(.callout)
