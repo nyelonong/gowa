@@ -6,11 +6,16 @@ cd "$(dirname "$0")/.."
 
 APP=Gowa.app
 IDENTIFIER=id.afrani.app.gowa
+VERSION=3.0.0
 
 swift build -c release
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+if [ -f AppIcon.icns ]; then
+    cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 cp .build/release/gowa "$APP/Contents/MacOS/gowa"
 
@@ -27,8 +32,10 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>Gowa</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
@@ -46,7 +53,9 @@ EOF
 
 codesign --force --sign - "$APP"
 
-echo "Built $APP ($(du -sh "$APP" | cut -f1))"
+ditto -c -k --sequesterRsrc --keepParent "$APP" Gowa.app.zip
+
+echo "Built $APP ($(du -sh "$APP" | cut -f1)) and Gowa.app.zip"
 if [ "${1:-}" = "--open" ]; then
     open "$APP"
 fi

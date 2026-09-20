@@ -61,6 +61,13 @@ final class AppState {
     var lastCaptures: [(name: String, value: String, stored: Bool)] = []
     var lastAssertions: [OpenCollectionDocument.AssertionOutcome] = []
 
+    struct DiffContext: Sendable {
+        var old: String
+        var new: String
+    }
+    var diffContext: DiffContext?
+    private var lastBodyByKey: [String: String] = [:]
+
     let history = HistoryStore()
     private let client = HTTPClient()
 
@@ -185,6 +192,8 @@ final class AppState {
         sessionVariables = [:]
         lastCaptures = []
         lastAssertions = []
+        diffContext = nil
+        lastBodyByKey = [:]
         selectedRequestPath = nil
         draft = nil
         result = nil
@@ -229,6 +238,9 @@ final class AppState {
             result = nil
             bodyDisplay = nil
             errorText = nil
+            lastCaptures = []
+            lastAssertions = []
+            diffContext = nil
         } else {
             // Folder selected: keep request selection independent.
             selectedRequestPath = nil
@@ -528,7 +540,10 @@ final class AppState {
     // MARK: - Send
 
     func send() {
-        guard !busy, let snapshot = draft else { return }
+        guard !busy, var snapshot = draft else { return }
+        if let path = selectedRequestPath, let doc = document {
+            doc.applyInheritance(to: &snapshot, at: path)
+        }
         let resolution = document?.resolveVariables(in: activeEnvironment) ?? (values: [:], missingSecrets: [])
         let missing = resolution.missingSecrets
         if !missing.isEmpty {
@@ -561,6 +576,13 @@ final class AppState {
                 self.result = response
                 self.history.record(method: method, url: effective.url, body: effective.body, status: response.status)
                 self.runCaptures(for: snapshot, response: response)
+                if let key = selectedRequestPath?.map(String.init).joined(separator: ".") {
+                    let diffText = String(data: response.body.prefix(4 << 20), encoding: .utf8) ?? ""
+                    if let previous = lastBodyByKey[key], previous != diffText {
+                        diffContext = DiffContext(old: previous, new: diffText)
+                    }
+                    lastBodyByKey[key] = diffText
+                }
                 self.lastAssertions = snapshot.assertions
                     .filter { !$0.disabled }
                     .map { OpenCollectionDocument.evaluateAssertion($0, response: response) }
@@ -745,6 +767,7 @@ final class AppState {
         guard let doc = document, var snapshot = doc.requestSnapshot(at: path) else {
             return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
         }
+        doc.applyInheritance(to: &snapshot, at: path)
         let effective = Self.effectiveRequest(from: snapshot, variables: variables)
         let method = HTTPMethod(rawValue: effective.method) ?? .GET
 

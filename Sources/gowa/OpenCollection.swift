@@ -553,10 +553,8 @@ final class OpenCollectionDocument {
         return http
     }
 
-    private func readAuth(_ item: [String: Any]) -> OAuthKind {
-        guard let auth = (item["http"] as? [String: Any])?["auth"] as? [String: Any],
-              let type = auth["type"] as? String
-        else { return .none }
+    private func readAuthDict(_ auth: [String: Any]) -> OAuthKind {
+        guard let type = auth["type"] as? String else { return .none }
         switch type {
         case "none": return .none
         case "inherit": return .inherit
@@ -570,6 +568,11 @@ final class OpenCollectionDocument {
             )
         default: return .preserved
         }
+    }
+
+    private func readAuth(_ item: [String: Any]) -> OAuthKind {
+        guard let auth = (item["http"] as? [String: Any])?["auth"] as? [String: Any] else { return .none }
+        return readAuthDict(auth)
     }
 
     // MARK: Environments
@@ -773,6 +776,75 @@ final class OpenCollectionDocument {
     }
 
     /// Substitute `{{name}}` placeholders; unknown variables stay literal.
+    // MARK: - Request defaults inheritance
+
+    /// Folder-level and collection-level request defaults (`request` blocks),
+    /// ordered outermost → innermost.
+    func defaultChain(for path: NodePath) -> [[String: Any]] {
+        var chain: [[String: Any]] = []
+        if let rootRequest = root["request"] as? [String: Any] { chain.append(rootRequest) }
+        var level = root["items"] as? [[String: Any]] ?? []
+        var current: [String: Any]?
+        for index in path {
+            guard index < level.count else { break }
+            current = level[index]
+            if let request = current?["request"] as? [String: Any],
+               (current?["info"] as? [String: Any])?["type"] as? String == "folder" {
+                chain.append(request)
+            }
+            level = current?["items"] as? [[String: Any]] ?? []
+        }
+        return chain
+    }
+
+    /// Resolve `inherit` auth: walk from the innermost folder outward; the
+    /// nearest level defining executable auth (other than none/inherit)
+    /// wins.
+    func resolvedAuth(at path: NodePath) -> OAuthKind? {
+        for defaults in defaultChain(for: path).reversed() {
+            guard let auth = defaults["auth"] as? [String: Any] else { continue }
+            let kind = readAuthDict(auth)
+            switch kind {
+            case .none, .inherit, .preserved: continue
+            default: return kind
+            }
+        }
+        return nil
+    }
+
+    /// Merge folder/collection default headers (outermost first) under the
+    /// request's own headers, which win on name conflicts.
+    func resolvedHeaders(at path: NodePath, requestHeaders: [OCHeader]) -> [OCHeader] {
+        var merged: [OCHeader] = []
+        for defaults in defaultChain(for: path) {
+            guard let headers = defaults["headers"] as? [[String: Any]] else { continue }
+            for header in headers {
+                let name = header["name"] as? String ?? ""
+                guard !name.isEmpty,
+                      header["disabled"] as? Bool != true,
+                      !merged.contains(where: { $0.name.lowercased() == name.lowercased() })
+                else { continue }
+                merged.append(OCHeader(name: name, value: header["value"] as? String ?? "", disabled: false))
+            }
+        }
+        for header in requestHeaders {
+            if let position = merged.firstIndex(where: { $0.name.lowercased() == header.name.lowercased() }) {
+                merged[position] = header
+            } else {
+                merged.append(header)
+            }
+        }
+        return merged
+    }
+
+    /// Fold inheritance into a snapshot before sending.
+    func applyInheritance(to snapshot: inout OCRequestSnapshot, at path: NodePath) {
+        if case .inherit = snapshot.authKind {
+            snapshot.authKind = resolvedAuth(at: path) ?? .none
+        }
+        snapshot.headers = resolvedHeaders(at: path, requestHeaders: snapshot.headers)
+    }
+
     nonisolated static func interpolate(_ template: String, _ variables: [String: String]) -> String {
         guard template.contains("{{") else { return template }
         var result = template

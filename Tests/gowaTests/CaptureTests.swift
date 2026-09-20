@@ -190,3 +190,107 @@ func assertionsRoundTrip() throws {
     let snapshot = try #require(loaded.requestSnapshot(at: [0]))
     #expect(snapshot.assertions == [OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false)])
 }
+
+@Test("line diff marks additions, removals, and unchanged context")
+func lineDiff() {
+    let diff = LineDiff.diff("a\nb\nc", "a\nX\nc\n")
+    #expect(diff != nil)
+    #expect(diff!.contains { $0 == .removed("b") })
+    #expect(diff!.contains { $0 == .added("X") })
+    #expect(diff!.contains { $0 == .added("") })
+    #expect(diff!.contains { $0 == .same("a") })
+    #expect(diff!.contains { $0 == .same("c") })
+
+    #expect(LineDiff.diff("same", "same") == [.same("same")])
+    #expect(LineDiff.diff(String(repeating: "x\n", count: 2500), "y") == nil) // cap at 2000
+}
+
+@MainActor
+@Test("inherit auth and headers resolve from nearest folder, outermost first for headers")
+func inheritance() throws {
+    let yaml = """
+    opencollection: "1.0.0"
+    info:
+      name: Inherit
+    request:
+      auth:
+        type: bearer
+        token: collection-token
+      headers:
+      - name: X-Global
+        value: global
+    items:
+    - info:
+        name: Group
+        type: folder
+      request:
+        auth:
+          type: basic
+          username: folderu
+          password: folderp
+        headers:
+        - name: X-Group
+          value: group
+      items:
+      - info:
+          name: Inherit Request
+          type: http
+        http:
+          method: GET
+          url: https://api.test
+          auth:
+            type: inherit
+          headers:
+          - name: X-Own
+            value: own
+      - info:
+          name: Own Auth Request
+          type: http
+        http:
+          method: GET
+          url: https://api.test
+          auth:
+            type: bearer
+            token: own-token
+    """
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gowa-inh-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("collection.yml")
+    try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+    let doc = try OpenCollectionDocument.load(from: file)
+
+    // [0] = Inherit Request: folder basic auth wins (nearest folder), headers merged
+    var snapshot = try #require(doc.requestSnapshot(at: [0, 0]))
+    #expect(snapshot.authKind == .inherit)
+    doc.applyInheritance(to: &snapshot, at: [0, 0])
+    #expect(snapshot.authKind == .basic(username: "folderu", password: "folderp"))
+    #expect(snapshot.headers.contains { $0.name == "X-Global" && $0.value == "global" })
+    #expect(snapshot.headers.contains { $0.name == "X-Group" && $0.value == "group" })
+    #expect(snapshot.headers.contains { $0.name == "X-Own" && $0.value == "own" })
+
+    // [0, 1] = Own Auth Request: own auth untouched; default headers still merged
+    var own = try #require(doc.requestSnapshot(at: [0, 1]))
+    doc.applyInheritance(to: &own, at: [0, 1])
+    #expect(own.authKind == .bearer(token: "own-token"))
+    #expect(own.headers.contains { $0.name == "X-Group" })
+
+    // Deep folder chain: collection token reached when folder has none
+    let folder2 = doc.addFolder(under: [0], name: "Deep")
+    _ = doc.addRequest(under: folder2, snapshot: OCRequestSnapshot(
+        name: "Deep Request",
+        method: "GET",
+        url: "https://api.test",
+        params: [],
+        headers: [],
+        bodyType: nil,
+        bodyData: "",
+        authKind: .inherit,
+        settings: OCSettings(followRedirects: nil, timeout: nil),
+        docs: nil
+    ))
+    var deep = try #require(doc.requestSnapshot(at: [0, 2, 0]))
+    doc.applyInheritance(to: &deep, at: [0, 2, 0])
+    // The innermost folder (Deep) defines no auth → falls through to Group's basic.
+    #expect(deep.authKind == .basic(username: "folderu", password: "folderp"))
+}

@@ -129,6 +129,7 @@ struct ResponseView: View {
     let display: BodyDisplay
     @State private var tab: Tab = .body
     @State private var prettyPrinted = false
+    @State private var showDiff = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
@@ -176,6 +177,16 @@ struct ResponseView: View {
                         .controlSize(.small)
                 }
 
+                if app.diffContext != nil {
+                    Button {
+                        showDiff.toggle()
+                    } label: {
+                        Image(systemName: showDiff ? "text.bubble" : "plus.slash.minus")
+                    }
+                    .buttonStyle(.plain)
+                    .help(showDiff ? "Back to response" : "Diff with previous response")
+                }
+
                 Button {
                     app.beginFindInResponse()
                 } label: {
@@ -217,7 +228,9 @@ struct ResponseView: View {
 
             switch tab {
             case .body:
-                if result.body.isEmpty {
+                if showDiff, let context = app.diffContext {
+                    DiffViewer(context: context)
+                } else if result.body.isEmpty {
                     ContentUnavailableView(
                         "Empty body",
                         systemImage: "doc",
@@ -276,5 +289,72 @@ struct ResponseView: View {
     private func formatDuration(_ d: Duration) -> String {
         let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e18
         return String(format: "%.0f ms", ms)
+    }
+}
+
+/// Colored line-by-line view of the previous vs current response body.
+struct DiffViewer: View {
+    let context: AppState.DiffContext
+
+    var body: some View {
+        let lines = LineDiff.diff(context.old, context.new) ?? []
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Text("Previous response → current")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("\(lines.filter { if case .added = $0 { return true }; return false }.count) added")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                    Text("\(lines.filter { if case .removed = $0 { return true }; return false }.count) removed")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                diffLines(lines)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func diffLines(_ lines: [LineDiff.Line]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(lines.indices, id: \.self) { index in
+                let line = lines[index]
+                let (prefix, color): (String, Color) = {
+                    switch line {
+                    case .added: return ("+ ", Color.green.opacity(0.14))
+                    case .removed: return ("- ", Color.red.opacity(0.14))
+                    case .same: return ("  ", Color.clear)
+                    }
+                }()
+                HStack(spacing: 0) {
+                    Text(prefix)
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 18)
+                    Text(lineText(line))
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 1)
+                .background(color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func lineText(_ line: LineDiff.Line) -> String {
+        switch line {
+        case .added(let text): return text
+        case .removed(let text): return text
+        case .same(let text): return text
+        }
     }
 }
