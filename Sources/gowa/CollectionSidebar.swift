@@ -96,6 +96,8 @@ struct CollectionSidebar: View {
                 Menu {
                     Button("New Request") { app.addRequest(under: nil) }
                     Button("New Folder") { app.addFolder(under: nil) }
+                    Divider()
+                    Button("Paste cURL…") { app.showingCurlImport = true }
                 } label: {
                     Label("New", systemImage: "plus")
                 }
@@ -138,6 +140,8 @@ struct CollectionSidebar: View {
                 .foregroundStyle(.secondary)
             Button("Add a Request") { app.addRequest(under: nil) }
                 .buttonStyle(.borderedProminent)
+            Button("Paste cURL…") { app.showingCurlImport = true }
+                .buttonStyle(.bordered)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -39,6 +39,7 @@ final class AppState {
     var activeEnvironment: String?
     var environments: [OCEnvironmentSnapshot] = []
     var showingEnvironmentManager = false
+    var showingCurlImport = false
 
     /// Secret variables of the active environment with no stored value.
     var missingSecrets: [String] {
@@ -304,6 +305,28 @@ final class AppState {
         var n = 2
         while existing.contains("\(base) \(n)") { n += 1 }
         return "\(base) \(n)"
+    }
+
+    // MARK: - cURL import
+
+    func addRequestFromCurl(_ snapshot: OCRequestSnapshot, under parent: NodePath?) {
+        guard let doc = document else { return }
+        let path = doc.addRequest(under: parent, snapshot: snapshot)
+        markDirtyAndRebuild()
+        select(path: path)
+    }
+
+    /// Flattened destination options for import pickers.
+    func folderOptions() -> [(path: NodePath, label: String)] {
+        var options: [(NodePath, String)] = []
+        func walk(_ nodes: [SidebarNode], _ depth: Int) {
+            for node in nodes where node.isFolder {
+                options.append((node.node.path, String(repeating: "    ", count: depth) + node.name))
+                walk(node.children, depth + 1)
+            }
+        }
+        walk(sidebarTree, 0)
+        return options
     }
 
     // MARK: - Environment management

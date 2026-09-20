@@ -39,6 +39,12 @@ struct ContentView: View {
         )) {
             EnvironmentsSheet(app: app)
         }
+        .sheet(isPresented: Binding(
+            get: { app.showingCurlImport },
+            set: { app.showingCurlImport = $0 }
+        )) {
+            CurlImportSheet(app: app)
+        }
     }
 
     private var missingSecretsBar: some View {

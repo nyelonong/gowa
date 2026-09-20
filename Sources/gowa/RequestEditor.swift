@@ -26,6 +26,7 @@ struct RequestEditor: View {
                     Menu("New Folder") {
                         Button("At top level") { app.addFolder(under: nil) }
                     }
+                    Button("Paste cURL…") { app.showingCurlImport = true }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
