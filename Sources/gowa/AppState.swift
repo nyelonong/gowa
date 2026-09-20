@@ -83,8 +83,20 @@ final class AppState {
         panel.allowedContentTypes = [.yaml]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        openCollection(at: url)
+        presentAsSheet(panel) { response in
+            guard response == .OK, let url = panel.url else { return }
+            self.openCollection(at: url)
+        }
+    }
+
+    /// File panels attach as sheets to the key window so they can never
+    /// drift to a detached position (e.g. a secondary display).
+    private func presentAsSheet(_ panel: NSSavePanel, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
     }
 
     func openCollection(at url: URL) {
@@ -119,14 +131,16 @@ final class AppState {
         panel.allowedContentTypes = [.yaml]
         panel.nameFieldStringValue = sanitizeFileName(doc.name) + ".yml"
         panel.directoryURL = defaultWorkspaceDirectory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try doc.save(to: url)
-            hasUnsavedChanges = false
-            defaultWorkspaceDirectory = url.deletingLastPathComponent()
-            statusMessage = "Saved to \(url.lastPathComponent) — commit it with git"
-        } catch {
-            statusMessage = "Save failed: \(error.localizedDescription)"
+        presentAsSheet(panel) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try doc.save(to: url)
+                self.hasUnsavedChanges = false
+                self.defaultWorkspaceDirectory = url.deletingLastPathComponent()
+                self.statusMessage = "Saved to \(url.lastPathComponent) — commit it with git"
+            } catch {
+                self.statusMessage = "Save failed: \(error.localizedDescription)"
+            }
         }
     }
 
