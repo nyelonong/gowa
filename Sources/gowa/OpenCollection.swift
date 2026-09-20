@@ -75,11 +75,13 @@ struct OCRequestSnapshot: Sendable {
 
 // MARK: - Environments
 
-struct OCVariable: Equatable, Sendable {
+struct OCVariable: Equatable, Sendable, Identifiable {
     var name: String
     var value: String
     var secret: Bool
     var disabled: Bool
+
+    var id: String { name }
 }
 
 struct OCEnvironmentSnapshot: Identifiable, Equatable, Sendable {

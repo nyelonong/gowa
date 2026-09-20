@@ -91,6 +91,17 @@ private struct EditorContent: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { app.send() }
 
+                if !activeVariables.isEmpty {
+                    Menu {
+                        ForEach(activeVariables) { variable in
+                            Button("{{\(variable.name)}}") { insertVariableAtCursor(variable) }
+                        }
+                    } label: {
+                        Image(systemName: "curlybraces.square")
+                    }
+                    .help("Insert a variable at the cursor")
+                }
+
                 if app.busy {
                     ProgressView()
                         .controlSize(.small)
@@ -110,6 +121,25 @@ private struct EditorContent: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
+            if !variableSuggestions.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "curlybraces")
+                        .foregroundStyle(.secondary)
+                    Text("Complete:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(variableSuggestions) { variable in
+                        Button("{{\(variable.name)}}") {
+                            completeVariable(variable)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
+
             Picker("Section", selection: $section) {
                 ForEach(Section.allCases) { section in
                     Text(section.rawValue).tag(section)
@@ -128,6 +158,46 @@ private struct EditorContent: View {
             case .settings: SettingsSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
             }
         }
+    }
+
+    // MARK: variable quick-add
+
+    private var activeVariables: [OCVariable] {
+        app.environments
+            .first(where: { $0.name == app.activeEnvironment })?
+            .variables
+            .filter { !$0.disabled && !$0.name.isEmpty } ?? []
+    }
+
+    private var trailingVariablePartial: String? {
+        guard let match = draft.url.range(of: #"\{\{([A-Za-z0-9_]*)$"#, options: .regularExpression) else { return nil }
+        return String(draft.url[match.lowerBound...])
+    }
+
+    private var variableSuggestions: [OCVariable] {
+        guard let partial = trailingVariablePartial else { return [] }
+        let typed = partial.dropFirst(2).lowercased()
+        return activeVariables.filter { $0.name.lowercased().hasPrefix(typed) }
+    }
+
+    private func completeVariable(_ variable: OCVariable) {
+        guard let match = draft.url.range(of: #"\{\{([A-Za-z0-9_]*)$"#, options: .regularExpression) else { return }
+        var newURL = draft.url
+        newURL.replaceSubrange(match, with: "{{\(variable.name)}}")
+        commit { $0.url = newURL }
+    }
+
+    private func insertVariableAtCursor(_ variable: OCVariable) {
+        let token = "{{\(variable.name)}}"
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSText else {
+            commit { $0.url += token }
+            return
+        }
+        let location = min(editor.selectedRange.location, draft.url.utf16.count)
+        var newURL = draft.url
+        let index = newURL.index(newURL.startIndex, offsetBy: location)
+        newURL.insert(contentsOf: token, at: index)
+        commit { $0.url = newURL }
     }
 
     private func commit(_ change: (inout OCRequestSnapshot) -> Void) {

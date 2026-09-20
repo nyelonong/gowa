@@ -3,6 +3,13 @@ import SwiftUI
 struct CollectionSidebar: View {
     let app: AppState
 
+    static let widthDefaultsKey = "gowa.sidebar.width"
+
+    static var savedWidth: CGFloat {
+        let saved = UserDefaults.standard.double(forKey: widthDefaultsKey)
+        return saved > 120 ? saved : 300
+    }
+
     var body: some View {
         @Bindable var app = app
 
@@ -13,7 +20,16 @@ struct CollectionSidebar: View {
                 emptyState
             }
         }
-        .navigationSplitViewColumnWidth(min: 220, ideal: 300)
+        .navigationSplitViewColumnWidth(min: 220, ideal: Self.savedWidth, max: 520)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onChange(of: geo.size.width) { _, new in
+                        guard new > 120 else { return }
+                        UserDefaults.standard.set(new, forKey: Self.widthDefaultsKey)
+                    }
+            }
+        )
         .alert("Rename", isPresented: Binding(
             get: { app.renameTarget != nil || app.renamingCollection },
             set: { if !$0 { app.cancelRename() } }
