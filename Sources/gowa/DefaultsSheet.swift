@@ -57,6 +57,7 @@ struct DefaultsSheet: View {
                     case .auth:
                         AuthEditor(
                             auth: defaults.auth,
+                            tokenActions: app.tokenActions(at: target.path),
                             inheritNote: target == .collection
                                 ? "No collection-wide auth. Requests set inherit fall back to none."
                                 : "Uses the parent folder's or the collection's auth."

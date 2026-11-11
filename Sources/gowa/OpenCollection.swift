@@ -53,6 +53,7 @@ enum OAuthKind: Equatable, Sendable {
     case basic(username: String, password: String)
     case bearer(token: String)
     case apiKey(key: String, value: String, placement: String)
+    case oauth2(OCOAuth2)
     case preserved // any other spec auth type: kept as-is in the document
 }
 
@@ -653,7 +654,7 @@ final class OpenCollectionDocument {
         } else {
             http.removeValue(forKey: "body")
         }
-        if let auth = authDict(snapshot.authKind) {
+        if let auth = authDict(snapshot.authKind, existing: http["auth"] as? [String: Any]) {
             http["auth"] = auth
         }
         http.removeValue(forKey: "settings")
@@ -671,8 +672,9 @@ final class OpenCollectionDocument {
     }
 
     /// Spec `auth` block; nil for `.preserved`, whose original block stays untouched.
-    private func authDict(_ kind: OAuthKind) -> [String: Any]? {
+    private func authDict(_ kind: OAuthKind, existing: [String: Any]? = nil) -> [String: Any]? {
         switch kind {
+        case .oauth2(let config): config.dict(merging: existing ?? [:])
         case .none: ["type": "none"]
         case .inherit: ["type": "inherit"]
         case .basic(let username, let password): ["type": "basic", "username": username, "password": password]
@@ -695,6 +697,7 @@ final class OpenCollectionDocument {
                 value: auth["value"] as? String ?? "",
                 placement: auth["placement"] as? String ?? "header"
             )
+        case "oauth2": return OCOAuth2(auth).map(OAuthKind.oauth2) ?? .preserved
         default: return .preserved
         }
     }
@@ -933,7 +936,7 @@ final class OpenCollectionDocument {
         switch defaults.auth {
         case .inherit: request.removeValue(forKey: "auth")
         case .preserved: break
-        default: request["auth"] = authDict(defaults.auth)
+        default: request["auth"] = authDict(defaults.auth, existing: request["auth"] as? [String: Any])
         }
         if defaults.variables.isEmpty {
             request.removeValue(forKey: "variables")

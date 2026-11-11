@@ -117,6 +117,7 @@ final class AppState {
 
     let history = HistoryStore()
     private(set) var cookieJar: CookieJar?
+    private(set) var oauthClient: OAuth2Client?
     /// Bumped when the jar changes so cookie views refresh.
     var cookieRevision = 0
     var showingCookies = false
@@ -144,9 +145,31 @@ final class AppState {
 
     /// Variables `{{name}}` resolves to for the selected request (or folder).
     var variableScope: VariableScope {
-        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar)
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
         let resolution = executor.variables(at: selectedRequestPath, session: sessionVariables)
         return VariableScope(values: resolution.values, secretNames: Set(resolution.missingSecrets))
+    }
+
+    /// Token actions for the OAuth 2.0 editor, using variables visible at `path`.
+    func tokenActions(at path: NodePath?) -> OAuthTokenActions {
+        let resolve = { [weak self] (config: OCOAuth2) -> OCOAuth2 in
+            guard let self else { return config }
+            let executor = RequestExecutor(document: self.document, environment: self.activeEnvironment)
+            return config.interpolated(executor.variables(at: path, session: self.sessionVariables).values)
+        }
+        return OAuthTokenActions(
+            status: { [weak self] config in self?.oauthClient?.cachedToken(for: resolve(config)) },
+            fetch: { [weak self] config in
+                guard let client = self?.oauthClient else { return "Open a collection first" }
+                do {
+                    _ = try await client.fetch(resolve(config))
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            },
+            clear: { [weak self] config in self?.oauthClient?.clear(resolve(config)) }
+        )
     }
 
     // MARK: - Folder and collection defaults
@@ -298,6 +321,7 @@ final class AppState {
             Task { @MainActor in self?.cookieRevision += 1 }
         }
         cookieJar = jar
+        oauthClient = OAuth2Client(collectionID: doc.documentID)
         rememberCurrentCollection()
         hasUnsavedChanges = false
         sessionVariables = [:]
@@ -678,7 +702,7 @@ final class AppState {
 
     func send() {
         guard !busy, let snapshot = draft else { return }
-        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar)
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
         do {
             _ = try executor.prepare(snapshot, at: selectedRequestPath, session: sessionVariables)
         } catch {
@@ -914,7 +938,7 @@ final class AppState {
         guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else {
             return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
         }
-        let executor = RequestExecutor(document: doc, environment: activeEnvironment, cookies: cookieJar)
+        let executor = RequestExecutor(document: doc, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
         let clock = ContinuousClock()
         let start = clock.now
         do {
@@ -1053,7 +1077,7 @@ final class AppState {
             } else {
                 headers.append((name: interpolate(key, variables), value: interpolatedValue))
             }
-        case .none, .inherit, .preserved:
+        case .none, .inherit, .preserved, .oauth2:
             break
         }
 
@@ -1079,6 +1103,8 @@ final class AppState {
         case .basic(let username, let password): parts += [username, password]
         case .bearer(let token): parts.append(token)
         case .apiKey(let key, let value, _): parts += [key, value]
+        case .oauth2(let config):
+            parts += [config.accessTokenUrl, config.authorizationUrl, config.clientId, config.clientSecret, config.username, config.password, config.scope]
         case .none, .inherit, .preserved: break
         }
         let text = parts.joined(separator: "\n")

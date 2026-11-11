@@ -340,7 +340,7 @@ struct AuthSection: View {
     let commit: RequestCommitter
 
     var body: some View {
-        AuthEditor(auth: draft.authKind, variables: app.variableScope) { auth in
+        AuthEditor(auth: draft.authKind, variables: app.variableScope, tokenActions: app.tokenActions(at: app.selectedRequestPath)) { auth in
             commit { $0.authKind = auth }
         }
         .padding(16)

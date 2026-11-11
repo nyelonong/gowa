@@ -1,9 +1,18 @@
 import SwiftUI
 
 /// Auth type picker and fields, shared by requests and folder/collection defaults.
+/// Token actions the OAuth 2.0 editor offers; nil hides them (e.g. folder defaults
+/// opened without a request context still get them through AppState).
+struct OAuthTokenActions {
+    var status: (OCOAuth2) -> OAuth2Token?
+    var fetch: (OCOAuth2) async -> String?
+    var clear: (OCOAuth2) -> Void
+}
+
 struct AuthEditor: View {
     let auth: OAuthKind
     var variables: VariableScope?
+    var tokenActions: OAuthTokenActions?
     var inheritNote = "Uses the auth of the nearest parent folder, or the collection, at send time."
     let onChange: (OAuthKind) -> Void
 
@@ -13,6 +22,7 @@ struct AuthEditor: View {
         case basic = "Basic"
         case bearer = "Bearer"
         case apiKey = "API Key"
+        case oauth2 = "OAuth 2.0"
         case preserved = "Custom"
         var id: String { rawValue }
     }
@@ -24,6 +34,7 @@ struct AuthEditor: View {
         case .basic: .basic
         case .bearer: .bearer
         case .apiKey: .apiKey
+        case .oauth2: .oauth2
         case .preserved: .preserved
         }
     }
@@ -39,6 +50,7 @@ struct AuthEditor: View {
                     case .basic: onChange(.basic(username: "", password: ""))
                     case .bearer: onChange(.bearer(token: ""))
                     case .apiKey: onChange(.apiKey(key: "", value: "", placement: "header"))
+                    case .oauth2: onChange(.oauth2(OCOAuth2()))
                     case .preserved: break
                     }
                 }
@@ -70,6 +82,8 @@ struct AuthEditor: View {
                 }
                 .labelsHidden()
                 .fixedSize()
+            case .oauth2(let config):
+                OAuth2Editor(config: config, variables: variables, actions: tokenActions) { onChange(.oauth2($0)) }
             case .none:
                 note("No authentication is applied.")
             case .inherit:

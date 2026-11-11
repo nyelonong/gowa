@@ -44,6 +44,7 @@ struct RequestExecutor {
     let document: OpenCollectionDocument?
     let environment: String?
     var cookies: CookieJar?
+    var oauth: OAuth2Client?
 
     func variables(at path: NodePath?, session: [String: String]) -> (values: [String: String], missingSecrets: [String]) {
         let resolution = document?.resolveVariables(in: environment) ?? (values: [:], missingSecrets: [])
@@ -68,9 +69,27 @@ struct RequestExecutor {
         return (snapshot, AppState.effectiveRequest(from: snapshot, variables: resolution.values, baseDirectory: base), resolution.values)
     }
 
+    /// Adds the OAuth 2.0 token as the configured header or query parameter.
+    func applyOAuth2(_ config: OCOAuth2, to effective: inout AppState.EffectiveRequest) async throws {
+        let client = oauth ?? OAuth2Client(collectionID: document?.documentID ?? "cli")
+        let token = try await client.token(for: config, interactive: false)
+        let value = token.value(source: config.tokenSource)
+        if !config.tokenQuery.isEmpty {
+            effective.url = AppState.appendQuery(effective.url, [(name: config.tokenQuery, value: value)])
+        } else {
+            let header = config.tokenHeader.isEmpty ? "Authorization" : config.tokenHeader
+            let bearer = header.caseInsensitiveCompare("Authorization") == .orderedSame ? "Bearer \(value)" : value
+            effective.headers.removeAll { $0.name.caseInsensitiveCompare(header) == .orderedSame }
+            effective.headers.append((name: header, value: bearer))
+        }
+    }
+
     func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) async throws -> ExecutionOutcome {
         let prepared = try prepare(snapshot, at: path, session: session)
-        let effective = prepared.effective
+        var effective = prepared.effective
+        if case .oauth2(let config) = prepared.snapshot.authKind {
+            try await applyOAuth2(config.interpolated(prepared.variables), to: &effective)
+        }
         let network = try document.map {
             try NetworkOptions.resolve(
                 $0.networkSettings,
