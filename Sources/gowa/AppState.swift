@@ -125,6 +125,18 @@ final class AppState {
     /// Bumped when the jar changes so cookie views refresh.
     var cookieRevision = 0
     var showingCookies = false
+    var gitStatus: GitStatus?
+
+    func refreshGitStatus() {
+        guard let url = document?.url else {
+            gitStatus = nil
+            return
+        }
+        Task { @MainActor in
+            let status = await GitStatus.load(for: url)
+            if self.document?.url == url { self.gitStatus = status }
+        }
+    }
 
     private static let lastCollectionKey = "gowa.lastCollection"
 
@@ -286,6 +298,7 @@ final class AppState {
                 try doc.save()
                 hasUnsavedChanges = false
                 statusMessage = "Saved"
+                refreshGitStatus()
             }
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
@@ -306,6 +319,7 @@ final class AppState {
                 self.hasUnsavedChanges = false
                 self.defaultWorkspaceDirectory = url.deletingLastPathComponent()
                 self.statusMessage = "Saved to \(url.lastPathComponent) — commit it with git"
+                self.refreshGitStatus()
             } catch {
                 self.statusMessage = "Save failed: \(error.localizedDescription)"
             }
@@ -325,6 +339,8 @@ final class AppState {
             Task { @MainActor in self?.cookieRevision += 1 }
         }
         cookieJar = jar
+        gitStatus = nil
+        refreshGitStatus()
         oauthClient = OAuth2Client(collectionID: doc.documentID)
         rememberCurrentCollection()
         hasUnsavedChanges = false

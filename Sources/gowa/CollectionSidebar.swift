@@ -73,6 +73,19 @@ struct CollectionSidebar: View {
 
     private var collectionContent: some View {
         VStack(spacing: 0) {
+            content
+            if app.document?.url != nil {
+                Divider()
+                GitFooter(app: app)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            app.refreshGitStatus()
+        }
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
             header
             if app.sidebarTree.isEmpty {
                 Divider()
@@ -382,5 +395,80 @@ struct SidebarRow: View {
             Divider()
             Button("Delete", role: .destructive) { app.delete(node.node.path) }
         }
+    }
+}
+
+struct GitFooter: View {
+    let app: AppState
+    @State private var showingChanges = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let status = app.gitStatus {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(.secondary)
+                Text(status.branch)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if status.ahead > 0 { Text("↑\(status.ahead)").font(.caption).foregroundStyle(.secondary) }
+                if status.behind > 0 { Text("↓\(status.behind)").font(.caption).foregroundStyle(.secondary) }
+                Spacer(minLength: 4)
+                Button {
+                    showingChanges.toggle()
+                } label: {
+                    Text(summary(status))
+                        .font(.caption)
+                        .foregroundStyle(status.collectionChange == nil ? Color.secondary : Color.orange)
+                }
+                .buttonStyle(.plain)
+                .help("Show changed files")
+                .popover(isPresented: $showingChanges, arrowEdge: .top) { changes(status) }
+            } else {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(.tertiary)
+                Text("Not in a git repository")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func summary(_ status: GitStatus) -> String {
+        if let change = status.collectionChange { return "collection \(change.label)" }
+        return status.changes.isEmpty ? "clean" : "\(status.changes.count) changed"
+    }
+
+    private func changes(_ status: GitStatus) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(status.changes.isEmpty ? "Working tree clean" : "Uncommitted changes")
+                .font(.headline)
+            ForEach(status.changes.prefix(40)) { change in
+                HStack(spacing: 8) {
+                    Text(change.code.trimmingCharacters(in: .whitespaces))
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .foregroundStyle(change.code.contains("?") ? Color.green : Color.orange)
+                        .frame(width: 22, alignment: .leading)
+                    Text(change.path)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(change == status.collectionChange ? .semibold : .regular)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            if status.changes.count > 40 {
+                Text("and \(status.changes.count - 40) more").font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Commit from your terminal or git client; Gowa only reads git status.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+        }
+        .padding(14)
+        .frame(minWidth: 280, maxWidth: 420, alignment: .leading)
     }
 }
