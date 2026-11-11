@@ -14,7 +14,12 @@ struct DefaultsSheet: View {
         case auth = "Auth"
         case variables = "Variables"
         case docs = "Docs"
+        case network = "Network"
         var id: String { rawValue }
+    }
+
+    private var tabs: [Tab] {
+        target == .collection ? Tab.allCases : Tab.allCases.filter { $0 != .network }
     }
 
     var body: some View {
@@ -35,7 +40,7 @@ struct DefaultsSheet: View {
             }
             .padding(14)
 
-            TabStrip(tabs: Tab.allCases, selection: $tab, title: { $0.rawValue }, badge: badge)
+            TabStrip(tabs: tabs, selection: $tab, title: { $0.rawValue }, badge: badge)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
 
@@ -76,6 +81,8 @@ struct DefaultsSheet: View {
                         .background(Theme.fieldFill, in: RoundedRectangle(cornerRadius: Theme.cornerRadius))
                         .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).strokeBorder(Theme.hairline))
                         note("Markdown. Saved in the collection file.")
+                    case .network:
+                        NetworkSettingsView(app: app)
                     }
                 }
                 .padding(16)
@@ -89,7 +96,7 @@ struct DefaultsSheet: View {
         switch tab {
         case .headers: defaults.headers.filter { !$0.disabled }.count
         case .variables: defaults.variables.filter { !$0.disabled }.count
-        case .auth, .docs: 0
+        case .auth, .docs, .network: 0
         }
     }
 

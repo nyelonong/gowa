@@ -150,6 +150,7 @@ struct ResponseView: View {
     @State private var tab: Tab = .body
     @State private var prettyPrinted = false
     @State private var showDiff = false
+    @State private var showTimings = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
@@ -186,9 +187,18 @@ struct ResponseView: View {
                 .padding(.vertical, 3)
                 .background(statusColor.opacity(0.13), in: Capsule())
 
-                Text(formatDuration(result.elapsed))
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                Button {
+                    showTimings.toggle()
+                } label: {
+                    Text(formatDuration(result.elapsed))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Show timing breakdown")
+                .popover(isPresented: $showTimings, arrowEdge: .bottom) {
+                    TimingBreakdown(result: result)
+                }
 
                 Text(ByteCountFormatter.string(fromByteCount: Int64(result.body.count), countStyle: .binary))
                     .font(.callout.monospacedDigit())
@@ -372,5 +382,51 @@ struct DiffViewer: View {
         case .removed(let text): return text
         case .same(let text): return text
         }
+    }
+}
+
+struct TimingBreakdown: View {
+    let result: HTTPResult
+
+    var body: some View {
+        let total = max(result.elapsed.milliseconds, 1)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Timing").font(.headline)
+            if result.timings.isEmpty {
+                Text("No breakdown available (the connection was reused or the response came from a redirect).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 260, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(result.timings.indices, id: \.self) { index in
+                let phase = result.timings[index]
+                let start = result.timings[..<index].reduce(0) { $0 + $1.duration.milliseconds }
+                HStack(spacing: 8) {
+                    Text(phase.name)
+                        .font(.caption)
+                        .frame(width: 104, alignment: .leading)
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.accentColor.opacity(0.75))
+                            .frame(width: max(2, geo.size.width * phase.duration.milliseconds / total))
+                            .offset(x: geo.size.width * min(start, total) / total)
+                    }
+                    .frame(width: 160, height: 8)
+                    Text(String(format: "%.1f ms", phase.duration.milliseconds))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 70, alignment: .trailing)
+                }
+            }
+            Divider()
+            HStack {
+                Text("Total").font(.caption.weight(.semibold))
+                Spacer()
+                Text(result.elapsed.millisecondsText).font(.caption.monospacedDigit().weight(.semibold))
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 300)
     }
 }

@@ -197,6 +197,7 @@ struct CollectionSidebar: View {
 
             Menu {
                 Button("Collection Settings…") { app.editingDefaults = .collection }
+                Button("Cookies…") { app.showingCookies = true }
                 Divider()
                 Button("Rename Collection…") { app.beginRenameCollection() }
                 Button("Open Collection…") { app.openCollectionPanel() }

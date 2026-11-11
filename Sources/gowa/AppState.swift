@@ -116,6 +116,10 @@ final class AppState {
     private var lastBodyByKey: [String: String] = [:]
 
     let history = HistoryStore()
+    private(set) var cookieJar: CookieJar?
+    /// Bumped when the jar changes so cookie views refresh.
+    var cookieRevision = 0
+    var showingCookies = false
 
     private static let lastCollectionKey = "gowa.lastCollection"
 
@@ -140,7 +144,7 @@ final class AppState {
 
     /// Variables `{{name}}` resolves to for the selected request (or folder).
     var variableScope: VariableScope {
-        let executor = RequestExecutor(document: document, environment: activeEnvironment)
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar)
         let resolution = executor.variables(at: selectedRequestPath, session: sessionVariables)
         return VariableScope(values: resolution.values, secretNames: Set(resolution.missingSecrets))
     }
@@ -174,6 +178,14 @@ final class AppState {
         guard let doc = document else { return }
         doc.updateDefaults(at: target.path, defaults)
         hasUnsavedChanges = true
+    }
+
+    var networkSettings: OCNetworkSettings {
+        get { document?.networkSettings ?? OCNetworkSettings() }
+        set {
+            document?.networkSettings = newValue
+            hasUnsavedChanges = true
+        }
     }
 
     func defaultsTitle(for target: DefaultsTarget) -> String {
@@ -281,6 +293,11 @@ final class AppState {
     private func apply(_ doc: OpenCollectionDocument) {
         invalidateActiveSend()
         document = doc
+        let jar = CookieJar.forCollection(id: doc.documentID)
+        jar.onChange = { [weak self] in
+            Task { @MainActor in self?.cookieRevision += 1 }
+        }
+        cookieJar = jar
         rememberCurrentCollection()
         hasUnsavedChanges = false
         sessionVariables = [:]
@@ -661,7 +678,7 @@ final class AppState {
 
     func send() {
         guard !busy, let snapshot = draft else { return }
-        let executor = RequestExecutor(document: document, environment: activeEnvironment)
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar)
         do {
             _ = try executor.prepare(snapshot, at: selectedRequestPath, session: sessionVariables)
         } catch {
@@ -897,7 +914,7 @@ final class AppState {
         guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else {
             return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
         }
-        let executor = RequestExecutor(document: doc, environment: activeEnvironment)
+        let executor = RequestExecutor(document: doc, environment: activeEnvironment, cookies: cookieJar)
         let clock = ContinuousClock()
         let start = clock.now
         do {

@@ -58,6 +58,12 @@ struct ContentView: View {
         )) {
             CurlImportSheet(app: app)
         }
+        .sheet(isPresented: Binding(
+            get: { app.showingCookies },
+            set: { app.showingCookies = $0 }
+        )) {
+            CookiesSheet(app: app)
+        }
         .sheet(item: Binding(
             get: { app.editingDefaults },
             set: { app.editingDefaults = $0 }

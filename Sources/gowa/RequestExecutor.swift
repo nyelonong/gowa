@@ -43,6 +43,7 @@ enum ExecutionError: LocalizedError {
 struct RequestExecutor {
     let document: OpenCollectionDocument?
     let environment: String?
+    var cookies: CookieJar?
 
     func variables(at path: NodePath?, session: [String: String]) -> (values: [String: String], missingSecrets: [String]) {
         let resolution = document?.resolveVariables(in: environment) ?? (values: [:], missingSecrets: [])
@@ -53,7 +54,7 @@ struct RequestExecutor {
         return (values, resolution.missingSecrets)
     }
 
-    func prepare(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) throws -> (snapshot: OCRequestSnapshot, effective: AppState.EffectiveRequest) {
+    func prepare(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) throws -> (snapshot: OCRequestSnapshot, effective: AppState.EffectiveRequest, variables: [String: String]) {
         var snapshot = snapshot
         if let path, let document {
             document.applyInheritance(to: &snapshot, at: path)
@@ -64,15 +65,24 @@ struct RequestExecutor {
             throw ExecutionError.missingSecrets(missing)
         }
         let base = document?.url?.deletingLastPathComponent()
-        return (snapshot, AppState.effectiveRequest(from: snapshot, variables: resolution.values, baseDirectory: base))
+        return (snapshot, AppState.effectiveRequest(from: snapshot, variables: resolution.values, baseDirectory: base), resolution.values)
     }
 
     func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) async throws -> ExecutionOutcome {
         let prepared = try prepare(snapshot, at: path, session: session)
         let effective = prepared.effective
+        let network = try document.map {
+            try NetworkOptions.resolve(
+                $0.networkSettings,
+                variables: prepared.variables,
+                baseDirectory: $0.url?.deletingLastPathComponent(),
+                cookies: cookies
+            )
+        } ?? .none
         let client = HTTPClient(
             followRedirects: effective.followRedirects,
-            timeout: effective.timeout.map { TimeInterval($0) / 1000 } ?? 30
+            timeout: effective.timeout.map { TimeInterval($0) / 1000 } ?? 30,
+            network: network
         )
         let encoded = try effective.payload.encoded()
         var headers = effective.headers

@@ -89,7 +89,7 @@ enum CLIMode {
         var passed = 0
         var failed = 0
 
-        let executor = RequestExecutor(document: document, environment: envName)
+        let executor = RequestExecutor(document: document, environment: envName, cookies: CookieJar(fileURL: nil))
         for node in requests {
             if let filter, !node.name.contains(filter) { continue }
             guard let snapshot = document.requestSnapshot(at: node.path) else { continue }
