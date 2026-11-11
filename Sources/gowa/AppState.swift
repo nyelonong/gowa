@@ -546,6 +546,7 @@ final class AppState {
         grpc.task?.cancel()
         let run = UUID()
         grpc.runID = run
+        grpc.loadingSchema = false
         grpc.calling = true
         grpc.error = nil
         grpc.result = nil

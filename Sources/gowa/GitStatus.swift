@@ -58,6 +58,8 @@ struct GitStatus: Equatable, Sendable {
         let directory = file.deletingLastPathComponent()
         guard let root = await run(["rev-parse", "--show-toplevel"], in: directory)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !root.isEmpty,
+              // Status can run a repository's filter commands; skip repos that define any.
+              await run(["config", "--get-regexp", "^filter\\."], in: directory)?.isEmpty ?? true,
               let output = await run(["status", "--porcelain=v1", "--branch", "--untracked-files=all"], in: directory)
         else { return nil }
         let rootURL = URL(fileURLWithPath: root).resolvingSymlinksInPath().standardizedFileURL
