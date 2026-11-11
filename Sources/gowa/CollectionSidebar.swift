@@ -333,9 +333,9 @@ struct SidebarRow: View {
 
     private var requestLabel: some View {
         HStack(spacing: 6) {
-            Text(Theme.shortMethod(node.node.method))
+            Text(node.node.kind == "graphql" ? "GQL" : Theme.shortMethod(node.node.method))
                 .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(Theme.methodColor(node.node.method))
+                .foregroundStyle(node.node.kind == "graphql" ? Color.pink : Theme.methodColor(node.node.method))
                 .frame(width: 36, alignment: .trailing)
                 .accessibilityLabel(node.node.method ?? "HTTP")
             Text(node.name)

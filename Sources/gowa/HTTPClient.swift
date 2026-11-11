@@ -81,9 +81,9 @@ struct HTTPClient: Sendable {
     var timeout: TimeInterval = 30
 
     func send(
-        method: HTTPMethod,
+        method: String,
         urlText: String,
-        body: String,
+        body: Data?,
         headers: [(name: String, value: String)]
     ) async throws -> HTTPResult {
         let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -95,14 +95,14 @@ struct HTTPClient: Sendable {
         }
 
         var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
+        request.httpMethod = method
         let timeout = timeout > 0 ? timeout : TimeInterval.greatestFiniteMagnitude
         request.timeoutInterval = timeout
         for (name, value) in headers where !name.isEmpty {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        if method.carriesBody, !body.isEmpty {
-            request.httpBody = Data(body.utf8)
+        if let body, !body.isEmpty {
+            request.httpBody = body
         }
 
         let usesSharedSession = followRedirects

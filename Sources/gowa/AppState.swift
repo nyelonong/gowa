@@ -510,6 +510,25 @@ final class AppState {
         }
     }
 
+    /// Picks a file and reports its path, relative to the collection folder when inside it.
+    func chooseFile(_ completion: @escaping (String) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        let base = document?.url?.deletingLastPathComponent().standardizedFileURL
+        panel.directoryURL = base
+        presentAsSheet(panel) { response in
+            guard response == .OK, let url = panel.url?.standardizedFileURL else { return }
+            completion(Self.storedPath(for: url, base: base))
+        }
+    }
+
+    nonisolated static func storedPath(for url: URL, base: URL?) -> String {
+        guard let base else { return url.path }
+        let prefix = base.path.hasSuffix("/") ? base.path : base.path + "/"
+        return url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.path
+    }
+
     var findTrigger: Int = 0
 
     func beginFindInResponse() {
@@ -913,13 +932,82 @@ final class AppState {
         var method: String
         var url: String
         var headers: [(name: String, value: String)]
-        var body: String
+        var payload: EffectiveBody
         var followRedirects: Bool
         var timeout: Int?
+
+        init(method: String, url: String, headers: [(name: String, value: String)], payload: EffectiveBody, followRedirects: Bool, timeout: Int?) {
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.payload = payload
+            self.followRedirects = followRedirects
+            self.timeout = timeout
+        }
+
+        init(method: String, url: String, headers: [(name: String, value: String)], body: String, followRedirects: Bool, timeout: Int?) {
+            self.init(
+                method: method,
+                url: url,
+                headers: headers,
+                payload: body.isEmpty ? .none : .text(body, contentType: "text/plain"),
+                followRedirects: followRedirects,
+                timeout: timeout
+            )
+        }
+
+        var body: String { payload.summary }
+
+        func header(_ name: String) -> String? {
+            headers.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
+        }
+    }
+
+    static func effectivePayload(from snapshot: OCRequestSnapshot, variables: [String: String], baseDirectory: URL?) -> EffectiveBody {
+        let method = snapshot.method.uppercased()
+        if snapshot.isGraphQL {
+            let variablesText = interpolate(snapshot.graphqlVariables, variables).trimmingCharacters(in: .whitespacesAndNewlines)
+            var object: [String: Any] = ["query": interpolate(snapshot.bodyData, variables)]
+            if !variablesText.isEmpty {
+                object["variables"] = (try? JSONSerialization.jsonObject(with: Data(variablesText.utf8))) ?? variablesText
+            }
+            let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data()
+            return .text(String(data: data, encoding: .utf8) ?? "", contentType: "application/json")
+        }
+        guard method.requestHasBody else { return .none }
+        let fields = snapshot.formFields.filter { !$0.disabled && !$0.name.isEmpty }
+        switch snapshot.bodyType ?? "json" {
+        case "form-urlencoded":
+            return .form(fields.map { .init(name: interpolate($0.name, variables), value: interpolate($0.value, variables)) })
+        case "multipart-form":
+            return .multipart(fields.map { field in
+                let value = interpolate(field.value, variables)
+                return MultipartPart(
+                    name: interpolate(field.name, variables),
+                    text: field.kind == "file" ? nil : value,
+                    file: field.kind == "file" ? EffectiveBody.resolvePath(value, base: baseDirectory) : nil,
+                    contentType: field.contentType
+                )
+            })
+        case "file":
+            let path = interpolate(snapshot.filePath, variables)
+            guard !path.isEmpty else { return .none }
+            return .file(EffectiveBody.resolvePath(path, base: baseDirectory), contentType: snapshot.fileContentType)
+        case let type:
+            let text = interpolate(snapshot.bodyData, variables)
+            guard !text.isEmpty else { return .none }
+            let contentType = switch type {
+            case "xml": "application/xml"
+            case "text": "text/plain"
+            case "sparql": "application/sparql-query"
+            default: "application/json"
+            }
+            return .text(text, contentType: contentType)
+        }
     }
 
     /// Interpolate variables, apply auth, fill path params and fold query params into the URL.
-    static func effectiveRequest(from snapshot: OCRequestSnapshot, variables: [String: String]) -> EffectiveRequest {
+    static func effectiveRequest(from snapshot: OCRequestSnapshot, variables: [String: String], baseDirectory: URL? = nil) -> EffectiveRequest {
         let pathParams = snapshot.params
             .filter { !$0.disabled && !$0.name.isEmpty && $0.kind == "path" }
             .map { (name: $0.name, value: interpolate($0.value, variables)) }
@@ -953,16 +1041,12 @@ final class AppState {
         }
 
         let urlWithParams = appendQuery(url, extraQuery)
-        let method = snapshot.method.uppercased()
-        let body = method.requestHasBody
-            ? (snapshot.bodyType == "graphql" ? snapshot.bodyData : interpolate(snapshot.bodyData, variables))
-            : ""
 
         return EffectiveRequest(
-            method: method,
+            method: snapshot.method.uppercased(),
             url: urlWithParams,
             headers: headers,
-            body: body,
+            payload: effectivePayload(from: snapshot, variables: variables, baseDirectory: baseDirectory),
             followRedirects: snapshot.settings.followRedirects ?? true,
             timeout: snapshot.settings.timeout
         )
@@ -970,7 +1054,8 @@ final class AppState {
 
     /// Unset secrets this request refers to as `{{name}}`; unrelated unset secrets do not block it.
     static func missingSecrets(usedBy snapshot: OCRequestSnapshot, missing: [String], variables: [String: String]) -> [String] {
-        var parts = [snapshot.url, snapshot.bodyData]
+        var parts = [snapshot.url, snapshot.bodyData, snapshot.graphqlVariables, snapshot.filePath]
+        parts += snapshot.formFields.filter { !$0.disabled }.flatMap { [$0.name, $0.value] }
         parts += snapshot.params.filter { !$0.disabled }.flatMap { [$0.name, $0.value] }
         parts += snapshot.headers.filter { !$0.disabled }.flatMap { [$0.name, $0.value] }
         switch snapshot.authKind {

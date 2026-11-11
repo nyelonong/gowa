@@ -45,7 +45,15 @@ func basicAuthAndInferredPost() throws {
     let result = try CurlParser.parse("curl -u alice:s3cret -d 'x=1' https://api.test/login")
     #expect(result.method == "POST")
     #expect(result.authKind == .basic(username: "alice", password: "s3cret"))
-    #expect(result.bodyType == "text")
+    #expect(result.bodyType == "form-urlencoded")
+    #expect(result.formFields == [OCFormField(name: "x", value: "1")])
+}
+
+@Test("-G with a plain pair still becomes a query param")
+func getModePlainPair() throws {
+    let result = try CurlParser.parse("curl -G -d 'q=zig' https://api.test/search")
+    #expect(result.params.contains { $0.name == "q" && $0.value == "zig" })
+    #expect(result.formFields.isEmpty)
 }
 
 @Test("-G moves form data into query params")
@@ -64,12 +72,15 @@ func jsonFlag() throws {
     #expect(result.bodyData.contains(#""a":1"#))
 }
 
-@Test("multipart -F produces a warning and raw body")
+@Test("multipart -F becomes text and file fields")
 func multipart() throws {
-    let result = try CurlParser.parse("curl -F file=@photo.jpg -F caption=hi https://api.test/upload")
+    let result = try CurlParser.parse("curl -F 'file=@photo.jpg;type=image/jpeg' -F caption=hi https://api.test/upload")
     #expect(result.method == "POST")
     #expect(result.bodyType == "multipart-form")
-    #expect(!result.warnings.isEmpty)
+    #expect(result.formFields == [
+        OCFormField(name: "file", value: "photo.jpg", kind: "file", contentType: "image/jpeg"),
+        OCFormField(name: "caption", value: "hi"),
+    ])
 }
 
 @Test("non-curl and urlless input errors")

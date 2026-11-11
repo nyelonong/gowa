@@ -63,7 +63,8 @@ struct RequestExecutor {
         if !missing.isEmpty {
             throw ExecutionError.missingSecrets(missing)
         }
-        return (snapshot, AppState.effectiveRequest(from: snapshot, variables: resolution.values))
+        let base = document?.url?.deletingLastPathComponent()
+        return (snapshot, AppState.effectiveRequest(from: snapshot, variables: resolution.values, baseDirectory: base))
     }
 
     func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) async throws -> ExecutionOutcome {
@@ -73,11 +74,16 @@ struct RequestExecutor {
             followRedirects: effective.followRedirects,
             timeout: effective.timeout.map { TimeInterval($0) / 1000 } ?? 30
         )
+        let encoded = try effective.payload.encoded()
+        var headers = effective.headers
+        if let contentType = encoded.contentType, effective.header("Content-Type") == nil {
+            headers.append((name: "Content-Type", value: contentType))
+        }
         let response = try await client.send(
-            method: HTTPMethod(rawValue: effective.method) ?? .GET,
+            method: effective.method,
             urlText: effective.url,
-            body: effective.body,
-            headers: effective.headers
+            body: encoded.data,
+            headers: headers
         )
         try Task.checkCancellation()
 

@@ -354,35 +354,41 @@ struct BodySection: View {
     let draft: OCRequestSnapshot
     let commit: RequestCommitter
 
-    private func update(_ change: (inout OCRequestSnapshot) -> Void) {
-        commit(change)
-    }
+    static let types: [(tag: String, title: String)] = [
+        ("json", "JSON"),
+        ("text", "Text"),
+        ("xml", "XML"),
+        ("form-urlencoded", "Form URL-Encoded"),
+        ("multipart-form", "Multipart Form"),
+        ("file", "Binary File"),
+        ("graphql", "GraphQL"),
+    ]
 
-    private var carriesBody: Bool {
-        draft.method.requestHasBody
-    }
+    private var type: String { draft.bodyType ?? "json" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if carriesBody {
+            if draft.method.requestHasBody || draft.isGraphQL {
                 HStack(spacing: 10) {
                     Picker("Type", selection: Binding(
-                        get: { draft.bodyType ?? "json" },
-                        set: { newValue in update { snapshot in snapshot.bodyType = newValue } }
+                        get: { type },
+                        set: { newValue in
+                            commit { snapshot in
+                                if newValue == "graphql", !snapshot.method.requestHasBody { snapshot.method = "POST" }
+                                snapshot.bodyType = newValue
+                            }
+                        }
                     )) {
-                        Text("JSON").tag("json")
-                        Text("Text").tag("text")
-                        Text("XML").tag("xml")
-                        Text("Form URL-Encoded").tag("form-urlencoded")
+                        ForEach(Self.types, id: \.tag) { Text($0.title).tag($0.tag) }
                     }
                     .labelsHidden()
                     .fixedSize()
                     .accessibilityLabel("Body type")
 
-                    if (draft.bodyType ?? "json") == "json" {
+                    if type == "json" {
                         Button("Format") {
                             if let formatted = JSONHighlighter.prettyPrint(draft.bodyData) {
-                                update { snapshot in snapshot.bodyData = formatted }
+                                commit { $0.bodyData = formatted }
                             }
                         }
                         .controlSize(.small)
@@ -390,20 +396,25 @@ struct BodySection: View {
                     Spacer()
                 }
 
-                CodeEditor(
-                    text: Binding(
-                        get: { draft.bodyData },
-                        set: { newValue in update { snapshot in snapshot.bodyData = newValue } }
-                    ),
-                    highlightsJSON: (draft.bodyType ?? "json") == "json"
-                )
-                .background(Theme.fieldFill)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                        .strokeBorder(Theme.hairline)
-                )
-                .frame(maxHeight: .infinity)
+                switch type {
+                case "form-urlencoded":
+                    ScrollView {
+                        KeyValueTable(
+                            rows: draft.formFields.map(\.kvRow),
+                            noun: "field",
+                            variables: app.variableScope,
+                            onEdit: { edit in commit { $0.formFields.apply(edit) } }
+                        )
+                    }
+                case "multipart-form":
+                    ScrollView { multipartTable }
+                case "file":
+                    fileBody
+                case "graphql":
+                    graphqlBody
+                default:
+                    editor(Binding(get: { draft.bodyData }, set: { text in commit { $0.bodyData = text } }), json: type == "json")
+                }
             } else {
                 Text("\(draft.method) requests do not carry a body")
                     .font(.callout)
@@ -412,6 +423,111 @@ struct BodySection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(16)
+    }
+
+    private func editor(_ text: Binding<String>, json: Bool) -> some View {
+        CodeEditor(text: text, highlightsJSON: json)
+            .background(Theme.fieldFill)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).strokeBorder(Theme.hairline))
+            .frame(maxHeight: .infinity)
+    }
+
+    private var multipartTable: some View {
+        KeyValueTable(
+            rows: draft.formFields.map(\.kvRow),
+            noun: "part",
+            valuePlaceholder: "Value or file path",
+            extraTitle: "Type",
+            extraWidth: 112,
+            variables: app.variableScope,
+            onEdit: { edit in commit { $0.formFields.apply(edit) } }
+        ) { index in
+            HStack(spacing: 4) {
+                Picker("", selection: Binding(
+                    get: { draft.formFields[index].kind },
+                    set: { kind in commit { $0.formFields[index].kind = kind } }
+                )) {
+                    Text("Text").tag("text")
+                    Text("File").tag("file")
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .accessibilityLabel("Part type")
+
+                if draft.formFields[index].kind == "file" {
+                    IconButton(title: "Choose file", systemImage: "folder") {
+                        app.chooseFile { path in commit { $0.formFields[index].value = path } }
+                    }
+                }
+            }
+        }
+    }
+
+    private var fileBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                VariableField("Path to file — relative to the collection folder, or absolute", text: Binding(
+                    get: { draft.filePath },
+                    set: { path in commit { $0.filePath = path } }
+                ))
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(Theme.fieldFill, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.hairline))
+                .accessibilityLabel("File path")
+                Button("Choose…") {
+                    app.chooseFile { path in commit { $0.filePath = path } }
+                }
+            }
+            HStack(spacing: 8) {
+                Text("Content-Type")
+                    .font(.callout)
+                TextField("Detected from the file extension", text: Binding(
+                    get: { draft.fileContentType },
+                    set: { type in commit { $0.fileContentType = type } }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+                .frame(maxWidth: 320)
+            }
+            Text("The file's bytes are sent as the request body. The collection stores only the path.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private var graphqlBody: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Query").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                editor(Binding(get: { draft.bodyData }, set: { text in commit { $0.bodyData = text } }), json: false)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Variables (JSON)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                editor(Binding(get: { draft.graphqlVariables }, set: { text in commit { $0.graphqlVariables = text } }), json: true)
+            }
+            .frame(maxWidth: 360)
+        }
+    }
+}
+
+extension OCFormField {
+    var kvRow: KVRow { KVRow(name: name, value: value, disabled: disabled) }
+}
+
+extension Array where Element == OCFormField {
+    mutating func apply(_ edit: KVEdit) {
+        edit.apply(to: &self, row: \.kvRow) { row, existing in
+            OCFormField(
+                name: row.name,
+                value: row.value,
+                kind: existing?.kind ?? "text",
+                contentType: existing?.contentType ?? "",
+                disabled: row.disabled
+            )
+        }
     }
 }
 

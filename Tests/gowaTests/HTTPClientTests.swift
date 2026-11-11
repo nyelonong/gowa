@@ -63,7 +63,7 @@ func statusPhrases() {
 func missingScheme() async {
     let client = HTTPClient()
     do {
-        _ = try await client.send(method: .GET, urlText: "example.com", body: "", headers: [])
+        _ = try await client.send(method: "GET", urlText: "example.com", body: nil, headers: [])
         #expect(Bool(false), "expected error")
     } catch let error as HTTPError {
         #expect(error.errorDescription == "URL must start with http:// or https://")

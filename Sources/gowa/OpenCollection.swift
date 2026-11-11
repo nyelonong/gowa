@@ -27,6 +27,7 @@ struct OCNode: Identifiable {
     let isFolder: Bool
     let method: String?
     let url: String?
+    var kind: String = "http"
 
     var id: String { path.map(String.init).joined(separator: ".") }
 }
@@ -69,6 +70,16 @@ struct OCAssertion: Equatable, Sendable {
     var disabled: Bool
 }
 
+/// A form-urlencoded or multipart field. Multipart `file` parts hold a path,
+/// relative to the collection file when it lives beside it.
+struct OCFormField: Equatable, Sendable {
+    var name: String
+    var value: String
+    var kind: String = "text" // "text" | "file"
+    var contentType: String = ""
+    var disabled: Bool = false
+}
+
 struct OCSettings: Equatable, Sendable {
     var followRedirects: Bool?
     var timeout: Int?
@@ -87,6 +98,12 @@ struct OCRequestSnapshot: Sendable {
     var captures: [OCCapture] = []
     var assertions: [OCAssertion] = []
     var docs: String?
+    var formFields: [OCFormField] = []
+    var filePath: String = ""
+    var fileContentType: String = ""
+    var graphqlVariables: String = ""
+
+    var isGraphQL: Bool { bodyType == "graphql" }
 }
 
 /// Collection- or folder-level `request` defaults that requests inherit.
@@ -287,13 +304,15 @@ final class OpenCollectionDocument {
                 let path = basePath + [index]
                 let info = item["info"] as? [String: Any] ?? [:]
                 let isFolder = (info["type"] as? String) == "folder"
-                let http = item["http"] as? [String: Any] ?? [:]
+                let kind = info["type"] as? String ?? "http"
+                let details = Self.details(of: item) ?? [:]
                 nodes.append(OCNode(
                     path: path,
                     name: info["name"] as? String ?? "Untitled",
                     isFolder: isFolder,
-                    method: http["method"] as? String,
-                    url: http["url"] as? String
+                    method: details["method"] as? String,
+                    url: details["url"] as? String,
+                    kind: kind
                 ))
                 if isFolder {
                     walk(item["items"] as? [[String: Any]] ?? [], path)
@@ -315,10 +334,12 @@ final class OpenCollectionDocument {
     }
 
     func addRequest(under parent: NodePath?, snapshot: OCRequestSnapshot) -> NodePath {
+        let key = snapshot.isGraphQL ? "graphql" : "http"
         var item: [String: Any] = [
-            "info": ["name": snapshot.name, "type": "http"],
-            "http": buildHTTP(snapshot, preserving: [:]),
+            "info": ["name": snapshot.name, "type": key],
+            key: buildHTTP(snapshot, preserving: [:]),
         ]
+        writeSettings(snapshot, into: &item)
         writeRuntime(snapshot, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs }
         return append(item, under: parent)
@@ -379,13 +400,19 @@ final class OpenCollectionDocument {
 
     // MARK: Request reading / writing
 
+    /// Protocol block of a request item: `http` or `graphql`.
+    nonisolated static func details(of item: [String: Any]) -> [String: Any]? {
+        (item["http"] as? [String: Any]) ?? (item["graphql"] as? [String: Any])
+    }
+
     func requestSnapshot(at path: NodePath) -> OCRequestSnapshot? {
-        guard let item = item(at: path), let http = item["http"] as? [String: Any] else { return nil }
+        guard let item = item(at: path), let http = Self.details(of: item) else { return nil }
+        let isGraphQL = item["http"] == nil
         let info = item["info"] as? [String: Any] ?? [:]
-        let settings = http["settings"] as? [String: Any] ?? [:]
-        return OCRequestSnapshot(
+        let settings = item["settings"] as? [String: Any] ?? http["settings"] as? [String: Any] ?? [:]
+        var snapshot = OCRequestSnapshot(
             name: info["name"] as? String ?? "Untitled",
-            method: http["method"] as? String ?? "GET",
+            method: http["method"] as? String ?? (isGraphQL ? "POST" : "GET"),
             url: http["url"] as? String ?? "",
             params: (http["params"] as? [[String: Any]] ?? []).map {
                 OCParam(
@@ -402,17 +429,105 @@ final class OpenCollectionDocument {
                     disabled: $0["disabled"] as? Bool ?? false
                 )
             },
-            bodyType: bodyField(item, "type"),
-            bodyData: bodyField(item, "data") ?? "",
-            authKind: readAuth(item),
+            bodyType: nil,
+            bodyData: "",
+            authKind: readAuth(http),
             settings: OCSettings(
                 followRedirects: settings["followRedirects"] as? Bool,
-                timeout: settings["timeout"] as? Int
+                timeout: (settings["timeout"] as? NSNumber)?.intValue
             ),
             captures: Self.readCaptures(item),
             assertions: Self.readAssertions(item),
-            docs: item["docs"] as? String
+            docs: Self.readDocs(item["docs"])
         )
+        if isGraphQL {
+            let body = Self.selectedVariant(http["body"], key: "body") ?? [:]
+            snapshot.bodyType = "graphql"
+            snapshot.bodyData = body["query"] as? String ?? ""
+            snapshot.graphqlVariables = body["variables"] as? String ?? ""
+        } else if let body = Self.selectedVariant(http["body"], key: "body") {
+            Self.readBody(body, into: &snapshot)
+        }
+        return snapshot
+    }
+
+    /// A body or message may be one value or a list of titled variants.
+    nonisolated static func selectedVariant(_ raw: Any?, key: String) -> [String: Any]? {
+        if let single = raw as? [String: Any] { return single }
+        guard let variants = raw as? [[String: Any]], !variants.isEmpty else { return nil }
+        let chosen = variants.first { $0["selected"] as? Bool == true } ?? variants[0]
+        return chosen[key] as? [String: Any]
+    }
+
+    nonisolated static func readBody(_ body: [String: Any], into snapshot: inout OCRequestSnapshot) {
+        let type = body["type"] as? String ?? "json"
+        snapshot.bodyType = type
+        switch type {
+        case "form-urlencoded":
+            if let raw = body["data"] as? String {
+                snapshot.formFields = raw.split(separator: "&").map { pair in
+                    let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                    return OCFormField(
+                        name: parts[0].removingPercentEncoding ?? parts[0],
+                        value: parts.count > 1 ? (parts[1].replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? parts[1]) : ""
+                    )
+                }
+            } else {
+                snapshot.formFields = (body["data"] as? [[String: Any]] ?? []).map {
+                    OCFormField(name: $0["name"] as? String ?? "", value: $0["value"] as? String ?? "", disabled: $0["disabled"] as? Bool ?? false)
+                }
+            }
+        case "multipart-form":
+            snapshot.formFields = (body["data"] as? [[String: Any]] ?? []).flatMap { part -> [OCFormField] in
+                let values: [String] = (part["value"] as? [String]) ?? [(part["value"] as? String) ?? ""]
+                return values.map { value in
+                    OCFormField(
+                        name: part["name"] as? String ?? "",
+                        value: value,
+                        kind: part["type"] as? String ?? "text",
+                        contentType: part["contentType"] as? String ?? "",
+                        disabled: part["disabled"] as? Bool ?? false
+                    )
+                }
+            }
+        case "file":
+            let files = body["data"] as? [[String: Any]] ?? []
+            let chosen = files.first { $0["selected"] as? Bool == true } ?? files.first ?? [:]
+            snapshot.filePath = chosen["filePath"] as? String ?? ""
+            snapshot.fileContentType = chosen["contentType"] as? String ?? ""
+        default:
+            snapshot.bodyData = body["data"] as? String ?? ""
+        }
+    }
+
+    nonisolated static func bodyDict(_ snapshot: OCRequestSnapshot, existing: [String: Any]?) -> [String: Any] {
+        let type = snapshot.bodyType ?? "json"
+        switch type {
+        case "form-urlencoded":
+            return ["type": type, "data": snapshot.formFields.map { field -> [String: Any] in
+                var entry: [String: Any] = ["name": field.name, "value": field.value]
+                if field.disabled { entry["disabled"] = true }
+                return entry
+            }]
+        case "multipart-form":
+            return ["type": type, "data": snapshot.formFields.map { field -> [String: Any] in
+                var entry: [String: Any] = ["name": field.name, "value": field.value, "type": field.kind]
+                if !field.contentType.isEmpty { entry["contentType"] = field.contentType }
+                if field.disabled { entry["disabled"] = true }
+                return entry
+            }]
+        case "file":
+            var files = (existing?["type"] as? String == "file" ? existing?["data"] as? [[String: Any]] : nil) ?? []
+            let entry: [String: Any] = ["filePath": snapshot.filePath, "contentType": snapshot.fileContentType, "selected": true]
+            if let index = files.firstIndex(where: { $0["selected"] as? Bool == true }) ?? (files.isEmpty ? nil : 0) {
+                files[index].merge(entry) { _, new in new }
+            } else {
+                files = [entry]
+            }
+            return ["type": type, "data": files]
+        default:
+            return ["type": type, "data": snapshot.bodyData]
+        }
     }
 
     private static func readAssertions(_ item: [String: Any]) -> [OCAssertion] {
@@ -448,20 +563,19 @@ final class OpenCollectionDocument {
         }
     }
 
-    /// Body handling: raw families carry `data`; graphql carries `query`.
-    private func bodyField(_ item: [String: Any], _ key: String) -> String? {
-        guard let body = item["http"] as? [String: Any], let bodyDict = body["body"] as? [String: Any] else { return nil }
-        if let value = bodyDict[key] as? String { return value }
-        return nil
-    }
-
     func updateRequest(at path: NodePath, snapshot: OCRequestSnapshot) {
         guard var item = item(at: path) else { return }
         var info = item["info"] as? [String: Any] ?? [:]
         info["name"] = snapshot.name
         item["info"] = info
 
-        item["http"] = buildHTTP(snapshot, preserving: item)
+        let key = snapshot.isGraphQL ? "graphql" : "http"
+        let previous = Self.details(of: item) ?? [:]
+        item.removeValue(forKey: snapshot.isGraphQL ? "http" : "graphql")
+        info["type"] = key
+        item["info"] = info
+        item[key] = buildHTTP(snapshot, preserving: [key: previous])
+        writeSettings(snapshot, into: &item)
         writeRuntime(snapshot, into: &item, preserving: item)
         if let docs = snapshot.docs, !docs.isEmpty { item["docs"] = docs } else { item.removeValue(forKey: "docs") }
         write(item, at: path)
@@ -513,7 +627,7 @@ final class OpenCollectionDocument {
     }
 
     private func buildHTTP(_ snapshot: OCRequestSnapshot, preserving item: [String: Any]) -> [String: Any] {
-        var http = item["http"] as? [String: Any] ?? [:]
+        var http = item.values.first as? [String: Any] ?? [:]
         http["method"] = snapshot.method
         http["url"] = snapshot.url
         if !snapshot.params.isEmpty {
@@ -530,26 +644,30 @@ final class OpenCollectionDocument {
         } else {
             http.removeValue(forKey: "headers")
         }
-        if snapshot.method.requestHasBody {
-            var body: [String: Any] = ["type": snapshot.bodyType ?? "json", "data": snapshot.bodyData]
-            if snapshot.bodyType == "graphql", let existing = (item["http"] as? [String: Any])?["body"] as? [String: Any],
-               let variables = existing["variables"] {
-                body["variables"] = variables
-                body.removeValue(forKey: "data")
-                body["query"] = snapshot.bodyData
-            }
+        if snapshot.isGraphQL {
+            var body: [String: Any] = ["query": snapshot.bodyData]
+            if !snapshot.graphqlVariables.isEmpty { body["variables"] = snapshot.graphqlVariables }
             http["body"] = body
+        } else if snapshot.method.requestHasBody {
+            http["body"] = Self.bodyDict(snapshot, existing: Self.selectedVariant(http["body"], key: "body"))
         } else {
             http.removeValue(forKey: "body")
         }
         if let auth = authDict(snapshot.authKind) {
             http["auth"] = auth
         }
-        var settings: [String: Any] = [:]
+        http.removeValue(forKey: "settings")
+        return http
+    }
+
+    /// Spec request settings live beside the protocol block, not inside it.
+    private func writeSettings(_ snapshot: OCRequestSnapshot, into item: inout [String: Any]) {
+        var settings = item["settings"] as? [String: Any] ?? [:]
+        settings.removeValue(forKey: "followRedirects")
+        settings.removeValue(forKey: "timeout")
         if let follow = snapshot.settings.followRedirects { settings["followRedirects"] = follow }
         if let timeout = snapshot.settings.timeout { settings["timeout"] = timeout }
-        if !settings.isEmpty { http["settings"] = settings } else { http.removeValue(forKey: "settings") }
-        return http
+        if settings.isEmpty { item.removeValue(forKey: "settings") } else { item["settings"] = settings }
     }
 
     /// Spec `auth` block; nil for `.preserved`, whose original block stays untouched.
@@ -581,8 +699,8 @@ final class OpenCollectionDocument {
         }
     }
 
-    private func readAuth(_ item: [String: Any]) -> OAuthKind {
-        guard let auth = (item["http"] as? [String: Any])?["auth"] as? [String: Any] else { return .none }
+    private func readAuth(_ details: [String: Any]) -> OAuthKind {
+        guard let auth = details["auth"] as? [String: Any] else { return .none }
         return readAuthDict(auth)
     }
 

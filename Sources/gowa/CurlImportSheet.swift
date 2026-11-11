@@ -121,6 +121,11 @@ struct CurlImportSheet: View {
                         if !result.headers.isEmpty {
                             previewSection("Headers", result.headers.map { "\($0.name): \($0.value)" })
                         }
+                        if !result.formFields.isEmpty {
+                            previewSection("Body (\(result.bodyType ?? "form"))", result.formFields.map {
+                                "\($0.name)=\($0.kind == "file" ? "@" : "")\($0.value)"
+                            })
+                        }
                         if !result.bodyData.isEmpty {
                             previewSection("Body (\(result.bodyType ?? "text"))", [result.bodyData])
                         }
@@ -177,7 +182,8 @@ struct CurlImportSheet: View {
             bodyData: result.bodyData,
             authKind: result.authKind,
             settings: OCSettings(followRedirects: result.followRedirects, timeout: nil),
-            docs: nil
+            docs: nil,
+            formFields: result.formFields
         )
         let parent: NodePath? = destination >= 0 ? app.folderOptions()[safe: destination]?.path : nil
         snapshot.name = uniqueName(snapshot.name, under: parent)

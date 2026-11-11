@@ -7,6 +7,7 @@ struct CurlParseResult: Sendable {
     var headers: [OCHeader]
     var bodyType: String?
     var bodyData: String
+    var formFields: [OCFormField] = []
     var authKind: OAuthKind
     var followRedirects: Bool?
     var warnings: [String]
@@ -196,18 +197,26 @@ enum CurlParser {
         // Body assembly.
         var bodyData = ""
         var bodyType: String?
+        var formFields: [OCFormField] = []
         if !formParts.isEmpty {
             bodyType = "multipart-form"
-            bodyData = formParts.joined(separator: "\n")
-            warnings.append("Multipart form fields are stored as raw lines; review the body")
+            formFields = formParts.map(Self.multipartField)
         } else if !dataParts.isEmpty {
             bodyData = dataParts.joined(separator: getMode ? "&" : "\n")
             let contentType = headers.first { $0.0.lowercased() == "content-type" }?.1.lowercased() ?? ""
             let trimmed = bodyData.trimmingCharacters(in: .whitespacesAndNewlines)
             if contentType.contains("json") || jsonMode || trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
                 bodyType = "json"
-            } else if contentType.contains("x-www-form-urlencoded") {
+            } else if !getMode, contentType.contains("x-www-form-urlencoded") || (contentType.isEmpty && Self.looksURLEncoded(trimmed)) {
                 bodyType = "form-urlencoded"
+                formFields = trimmed.split(separator: "&").map { pair in
+                    let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                    return OCFormField(
+                        name: parts[0].removingPercentEncoding ?? parts[0],
+                        value: parts.count > 1 ? (parts[1].replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? parts[1]) : ""
+                    )
+                }
+                bodyData = ""
             } else {
                 bodyType = "text"
             }
@@ -242,11 +251,34 @@ enum CurlParser {
             url: finalURL,
             params: params,
             headers: headers.map { OCHeader(name: $0.0, value: $0.1, disabled: false) },
-            bodyType: bodyData.isEmpty ? nil : bodyType,
+            bodyType: bodyData.isEmpty && formFields.isEmpty ? nil : bodyType,
             bodyData: bodyData,
+            formFields: formFields,
             authKind: authKind,
             followRedirects: followRedirects,
             warnings: warnings
         )
+    }
+
+    /// `name=value`, `name=@path`, and `name=@path;type=mime` from `-F`.
+    static func multipartField(_ raw: String) -> OCFormField {
+        let parts = raw.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let name = parts[0]
+        var value = parts.count > 1 ? parts[1] : ""
+        guard value.hasPrefix("@") || value.hasPrefix("<") else {
+            return OCFormField(name: name, value: value)
+        }
+        value.removeFirst()
+        var contentType = ""
+        if let range = value.range(of: ";type=") {
+            contentType = String(value[range.upperBound...])
+            value = String(value[..<range.lowerBound])
+        }
+        return OCFormField(name: name, value: value, kind: "file", contentType: contentType)
+    }
+
+    static func looksURLEncoded(_ text: String) -> Bool {
+        !text.isEmpty && !text.contains(" ") && !text.contains("\n") && text.contains("=")
+            && text.split(separator: "&").allSatisfy { $0.contains("=") }
     }
 }

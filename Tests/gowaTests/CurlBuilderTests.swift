@@ -18,7 +18,7 @@ func curlCommand() {
     #expect(command.contains("'https://api.test/users?active=1'"))
     #expect(command.contains("-H 'Content-Type: application/json'"))
     #expect(command.contains("-H 'Authorization: Bearer tok'"))
-    #expect(command.contains("-d '{\"name\": \"it'\\''s fine\"}'"))
+    #expect(command.contains("--data-raw '{\"name\": \"it'\\''s fine\"}'"))
     #expect(command.contains("--max-time 30"))
     #expect(command.contains("-L"))
     #expect(!command.contains("it's fine'"))
@@ -37,6 +37,6 @@ func getCommand() {
     #expect(command.hasPrefix("curl"))
     #expect(command.contains("'https://api.test'"))
     #expect(!command.contains("-X"))
-    #expect(!command.contains("-d "))
+    #expect(!command.contains("--data"))
     #expect(!command.contains("-L"))
 }

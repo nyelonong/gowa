@@ -15,8 +15,26 @@ enum CurlBuilder {
             parts.append("-H \(shellQuote("\(name): \(value)"))")
         }
 
-        if !request.body.isEmpty {
-            parts.append("-d \(shellQuote(request.body))")
+        switch request.payload {
+        case .none:
+            break
+        case .text(let text, _):
+            parts.append("--data-raw \(shellQuote(text))")
+        case .form(let pairs):
+            for pair in pairs {
+                parts.append("--data-urlencode \(shellQuote("\(pair.name)=\(pair.value)"))")
+            }
+        case .multipart(let fields):
+            for field in fields {
+                if let file = field.file {
+                    let type = field.contentType.isEmpty ? "" : ";type=\(field.contentType)"
+                    parts.append("-F \(shellQuote("\(field.name)=@\(file.path)\(type)"))")
+                } else {
+                    parts.append("--form-string \(shellQuote("\(field.name)=\(field.text ?? "")"))")
+                }
+            }
+        case .file(let url, _):
+            parts.append("--data-binary \(shellQuote("@" + url.path))")
         }
 
         if let timeout = request.timeout, timeout > 0 {
