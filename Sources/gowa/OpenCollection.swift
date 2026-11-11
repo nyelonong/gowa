@@ -855,7 +855,7 @@ final class OpenCollectionDocument {
         for (name, value) in variables {
             result = result.replacingOccurrences(of: "{{\(name)}}", with: value)
         }
-        return result
+        return TemplateFunctions.render(result)
     }
 
     // MARK: Sample
