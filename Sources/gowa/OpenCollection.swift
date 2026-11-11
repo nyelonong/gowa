@@ -140,6 +140,7 @@ struct OCVariable: Equatable, Sendable, Identifiable {
 struct OCEnvironmentSnapshot: Identifiable, Equatable, Sendable {
     var name: String
     var variables: [OCVariable]
+    var color: String?
 
     var id: String { name }
 }
@@ -777,29 +778,46 @@ final class OpenCollectionDocument {
         get {
             let config = root["config"] as? [String: Any] ?? [:]
             return (config["environments"] as? [[String: Any]] ?? []).map { env in
-                OCEnvironmentSnapshot(
+                var variables = Self.readVariables(env["variables"])
+                for (index, raw) in (env["variables"] as? [[String: Any]] ?? []).enumerated() where index < variables.count {
+                    variables[index].secret = raw["secret"] as? Bool ?? false
+                }
+                return OCEnvironmentSnapshot(
                     name: env["name"] as? String ?? "Untitled",
-                    variables: (env["variables"] as? [[String: Any]] ?? []).map {
-                        OCVariable(
-                            name: $0["name"] as? String ?? "",
-                            value: $0["value"] as? String ?? "",
-                            secret: $0["secret"] as? Bool ?? false,
-                            disabled: $0["disabled"] as? Bool ?? false
-                        )
-                    }
+                    variables: variables,
+                    color: env["color"] as? String
                 )
             }
         }
         set {
             var config = root["config"] as? [String: Any] ?? [:]
-            config["environments"] = newValue.map { env in
-                var dict: [String: Any] = ["name": env.name]
-                if !env.variables.isEmpty {
-                    dict["variables"] = env.variables.map { variable in
-                        var variableDict: [String: Any] = ["name": variable.name, "value": variable.value]
-                        if variable.secret { variableDict["secret"] = true }
-                        if variable.disabled { variableDict["disabled"] = true }
-                        return variableDict
+            let existing = config["environments"] as? [[String: Any]] ?? []
+            let newNames = Set(newValue.map(\.name))
+            config["environments"] = newValue.enumerated().map { index, env in
+                // Keep keys Gowa doesn't edit (description, extends, externalSecrets…);
+                // a renamed environment is found by its position.
+                var dict = existing.first { $0["name"] as? String == env.name }
+                    ?? (index < existing.count && !newNames.contains(existing[index]["name"] as? String ?? "") ? existing[index] : [:])
+                dict["name"] = env.name
+                if let color = env.color, !color.isEmpty { dict["color"] = color } else { dict.removeValue(forKey: "color") }
+                let oldVariables = dict["variables"] as? [[String: Any]] ?? []
+                let names = Set(env.variables.map(\.name))
+                if env.variables.isEmpty {
+                    dict.removeValue(forKey: "variables")
+                } else {
+                    dict["variables"] = env.variables.enumerated().map { position, variable -> [String: Any] in
+                        var entry = oldVariables.first { $0["name"] as? String == variable.name }
+                            ?? (position < oldVariables.count && !names.contains(oldVariables[position]["name"] as? String ?? "") ? oldVariables[position] : [:])
+                        entry["name"] = variable.name
+                        if var typed = entry["value"] as? [String: Any] {
+                            typed["data"] = variable.value
+                            entry["value"] = typed
+                        } else {
+                            entry["value"] = variable.value
+                        }
+                        if variable.secret { entry["secret"] = true } else { entry.removeValue(forKey: "secret") }
+                        if variable.disabled { entry["disabled"] = true } else { entry.removeValue(forKey: "disabled") }
+                        return entry
                     }
                 }
                 return dict

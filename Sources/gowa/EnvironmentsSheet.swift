@@ -62,6 +62,10 @@ struct EnvironmentsSheet: View {
         )) {
             ForEach(app.environments) { env in
                 HStack {
+                    Circle()
+                        .fill(Theme.color(hex: env.color) ?? .clear)
+                        .overlay(Circle().strokeBorder(Theme.hairline))
+                        .frame(width: 9, height: 9)
                     Text(env.name)
                         .lineLimit(1)
                     Spacer()
@@ -71,6 +75,13 @@ struct EnvironmentsSheet: View {
                 }
                 .tag(env.name)
                 .contextMenu {
+                    Menu("Color") {
+                        Button("None") { app.setEnvironmentColor(env.name, hex: nil) }
+                        ForEach(Theme.environmentColors, id: \.hex) { option in
+                            Button(option.name) { app.setEnvironmentColor(env.name, hex: option.hex) }
+                        }
+                    }
+                    Divider()
                     Button("Delete \"\(env.name)\"", role: .destructive) {
                         app.deleteEnvironment(env.name)
                         if selectedEnvironment == env.name { selectedEnvironment = nil }

@@ -200,6 +200,7 @@ private struct EditorContent: View {
                     .padding(.horizontal, 4)
             }
             .buttonStyle(.borderedProminent)
+            .tint(app.activeEnvironmentColor)
             .controlSize(.large)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!app.canSend)

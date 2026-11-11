@@ -92,3 +92,28 @@ func bulkReplaceKeepsParamKind() {
     #expect(params.map(\.kind) == ["path", "query"])
     #expect(params.map(\.value) == ["2", "x"])
 }
+
+@MainActor
+@Test("editing environments keeps spec keys Gowa doesn't edit, across renames")
+func environmentsKeepUnknownKeys() {
+    let doc = OpenCollectionDocument(root: ["config": ["environments": [[
+        "name": "Prod", "color": "#E5484D", "description": "live", "extends": "Base",
+        "variables": [["name": "host", "value": ["type": "string", "data": "a"], "description": "api host"]],
+    ]]]])
+    var envs = doc.environments
+    #expect(envs[0].color == "#E5484D")
+    envs[0].name = "Production"
+    envs[0].variables[0].value = "b"
+    envs[0].color = "#30A46C"
+    doc.environments = envs
+
+    let raw = ((doc.root["config"] as? [String: Any])?["environments"] as? [[String: Any]])![0]
+    #expect(raw["name"] as? String == "Production")
+    #expect(raw["description"] as? String == "live")
+    #expect(raw["extends"] as? String == "Base")
+    #expect(raw["color"] as? String == "#30A46C")
+    let variable = (raw["variables"] as? [[String: Any]])![0]
+    #expect(variable["description"] as? String == "api host")
+    #expect((variable["value"] as? [String: Any])?["data"] as? String == "b")
+    #expect(Theme.color(hex: "#30A46C") != nil && Theme.color(hex: "blue") == nil)
+}

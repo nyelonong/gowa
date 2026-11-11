@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 
 struct HeaderField: Identifiable, Equatable, Sendable {
     var id = UUID()
@@ -637,6 +638,20 @@ final class AppState {
         doc.environments = envs
         hasUnsavedChanges = true
         refreshEnvironments()
+    }
+
+    func setEnvironmentColor(_ name: String, hex: String?) {
+        guard let doc = document else { return }
+        var envs = doc.environments
+        guard let index = envs.firstIndex(where: { $0.name == name }) else { return }
+        envs[index].color = hex
+        doc.environments = envs
+        hasUnsavedChanges = true
+        refreshEnvironments()
+    }
+
+    var activeEnvironmentColor: Color? {
+        Theme.color(hex: environments.first { $0.name == activeEnvironment }?.color)
     }
 
     func deleteEnvironment(_ name: String) {

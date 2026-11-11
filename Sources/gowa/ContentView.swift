@@ -28,6 +28,10 @@ struct ContentView: View {
                 welcome
             } else {
                 VStack(spacing: 0) {
+                    if let color = app.activeEnvironmentColor {
+                        color.frame(height: 3)
+                            .accessibilityLabel("Environment \(app.activeEnvironment ?? "") color")
+                    }
                     if !app.missingSecrets.isEmpty {
                         missingSecretsBar
                     }
@@ -130,7 +134,13 @@ struct ContentView: View {
             )) {
                 Text("No environment").tag("")
                 ForEach(app.environments) { environment in
-                    Text(environment.name).tag(environment.name)
+                    Label {
+                        Text(environment.name)
+                    } icon: {
+                        Image(systemName: "circle.fill")
+                            .foregroundStyle(Theme.color(hex: environment.color) ?? .secondary)
+                    }
+                    .tag(environment.name)
                 }
             }
             .pickerStyle(.inline)
@@ -139,8 +149,16 @@ struct ContentView: View {
             Divider()
             Button("Manage Environments…") { app.showingEnvironmentManager = true }
         } label: {
-            Label(app.activeEnvironment ?? "No environment", systemImage: "globe")
-                .labelStyle(.titleAndIcon)
+            Label {
+                Text(app.activeEnvironment ?? "No environment")
+            } icon: {
+                if let color = app.activeEnvironmentColor {
+                    Theme.dot(color)
+                } else {
+                    Image(systemName: "globe")
+                }
+            }
+            .labelStyle(.titleAndIcon)
         }
         .help("Choose or manage the active environment")
         .accessibilityLabel("Active environment: \(app.activeEnvironment ?? "none")")

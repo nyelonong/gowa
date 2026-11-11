@@ -1,9 +1,38 @@
+import AppKit
 import SwiftUI
 
 enum Theme {
     static let hairline = Color(nsColor: .separatorColor)
     static let fieldFill = Color(nsColor: .textBackgroundColor)
     static let cornerRadius: CGFloat = 8
+
+    static let environmentColors: [(name: String, hex: String)] = [
+        ("Red", "#E5484D"), ("Orange", "#F76B15"), ("Yellow", "#E2A336"),
+        ("Green", "#30A46C"), ("Blue", "#0090FF"), ("Purple", "#8E4EC6"), ("Gray", "#8B8D98"),
+    ]
+
+    /// A filled dot that keeps its color in toolbars, which draw symbols as templates.
+    static func dot(_ color: Color, size: CGFloat = 10) -> Image {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            NSColor(color).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return Image(nsImage: image)
+    }
+
+    /// `#RRGGBB` (spec environment colors); nil for anything else.
+    static func color(hex: String?) -> Color? {
+        guard var text = hex?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
+        if text.hasPrefix("#") { text.removeFirst() }
+        guard text.count == 6, let value = UInt32(text, radix: 16) else { return nil }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
 
     static func methodColor(_ method: String?) -> Color {
         switch method?.uppercased() {
