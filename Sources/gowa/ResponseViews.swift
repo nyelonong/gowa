@@ -187,6 +187,50 @@ struct ResponseView: View {
     @AppStorage("gowa.response.wrap") private var wraps = true
     @State private var showDiff = false
     @State private var showTimings = false
+    @State private var mode: BodyMode = .text
+    @State private var filter = ""
+
+    enum BodyMode: String, CaseIterable, Identifiable {
+        case text = "Text"
+        case tree = "Tree"
+        case preview = "Preview"
+        var id: String { rawValue }
+    }
+
+    private var availableModes: [BodyMode] {
+        var modes: [BodyMode] = [.text]
+        if display.isJSON { modes.append(.tree) }
+        if ResponsePreview.kind(for: result) != nil { modes.append(.preview) }
+        return modes
+    }
+
+    private var isXML: Bool {
+        let type = (result.headers.first { $0.name.lowercased() == "content-type" }?.value ?? "").lowercased()
+        return type.contains("xml") && !type.contains("svg")
+    }
+
+    private var parsedJSON: Any? {
+        display.isJSON ? try? JSONSerialization.jsonObject(with: result.body, options: [.fragmentsAllowed]) : nil
+    }
+
+    /// The filtered body, or an error message, when a filter is typed.
+    private var filtered: (text: String, error: String?)? {
+        let expression = filter.trimmingCharacters(in: .whitespaces)
+        guard !expression.isEmpty else { return nil }
+        do {
+            if display.isJSON, let json = parsedJSON {
+                let matches = try JSONPath.evaluate(expression, on: json)
+                return (matches.isEmpty ? "" : JSONPath.render(matches), matches.isEmpty ? "No matches" : nil)
+            }
+            if isXML {
+                let text = try XPathFilter.evaluate(expression, xml: result.body)
+                return (text, text.isEmpty ? "No matches" : nil)
+            }
+        } catch {
+            return ("", error.localizedDescription)
+        }
+        return nil
+    }
 
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
@@ -303,11 +347,16 @@ struct ResponseView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .task(id: result.finalURL.absoluteString + "\(result.elapsed)") { settleMode() }
 
             Divider()
 
             switch tab {
             case .body:
+                if (availableModes.count > 1 || display.isJSON || isXML), !showDiff, !result.body.isEmpty {
+                    bodyToolbar
+                    Divider()
+                }
                 if showDiff, let context = app.diffContext {
                     DiffViewer(context: context)
                 } else if result.body.isEmpty {
@@ -316,12 +365,22 @@ struct ResponseView: View {
                         systemImage: "doc",
                         description: Text("The response carried no content")
                     )
-                } else if !display.isJSON && String(data: result.body.prefix(16), encoding: .utf8) == nil {
+                } else if !display.isJSON && ResponsePreview.kind(for: result) == nil && String(data: result.body.prefix(16), encoding: .utf8) == nil {
                     ContentUnavailableView(
                         "Binary response",
                         systemImage: "doc.text",
                         description: Text("\(ByteCountFormatter.string(fromByteCount: Int64(result.body.count), countStyle: .binary)) of non-text data")
                     )
+                } else if mode == .preview, availableModes.contains(.preview) {
+                    ResponsePreview(result: result)
+                } else if let filtered {
+                    if let error = filtered.error {
+                        ContentUnavailableView(error, systemImage: "line.3.horizontal.decrease.circle")
+                    } else {
+                        CodeViewer(text: filtered.text, runs: display.isJSON ? JSONHighlighter.runs(filtered.text) : [], isJSON: display.isJSON, wraps: wraps)
+                    }
+                } else if mode == .tree, let json = parsedJSON {
+                    JSONTreeView(root: json)
                 } else {
                     CodeViewer(
                         text: shownText,
@@ -339,6 +398,55 @@ struct ResponseView: View {
                 cookiesList
             }
         }
+    }
+
+    /// Images and PDFs open in Preview; a mode the new response lacks falls back to Text.
+    private func settleMode() {
+        let kind = ResponsePreview.kind(for: result)
+        if kind == .image || kind == .pdf {
+            mode = .preview
+        } else if !availableModes.contains(mode) {
+            mode = .text
+        }
+    }
+
+    private var bodyToolbar: some View {
+        HStack(spacing: 10) {
+            if availableModes.count > 1 {
+                Picker("View", selection: $mode) {
+                    ForEach(availableModes) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            if (display.isJSON || isXML), mode != .preview {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .foregroundStyle(.secondary)
+                    TextField(display.isJSON ? "Filter with JSONPath, e.g. $.data[*].id or $..name" : "Filter with XPath, e.g. //item/@id", text: $filter)
+                        .textFieldStyle(.plain)
+                        .font(.system(.callout, design: .monospaced))
+                    if !filter.isEmpty {
+                        Button {
+                            filter = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel("Clear filter")
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     /// Cookies this response set, parsed from its Set-Cookie headers.
