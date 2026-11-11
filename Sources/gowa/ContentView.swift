@@ -74,6 +74,12 @@ struct ContentView: View {
             CurlImportSheet(app: app)
         }
         .sheet(isPresented: Binding(
+            get: { app.showingPalette },
+            set: { app.showingPalette = $0 }
+        )) {
+            CommandPalette(app: app) { sideBySide.toggle() }
+        }
+        .sheet(isPresented: Binding(
             get: { app.showingCookies },
             set: { app.showingCookies = $0 }
         )) {

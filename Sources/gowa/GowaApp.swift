@@ -34,6 +34,13 @@ struct GowaApp: App {
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(app.draft == nil)
             }
+            CommandGroup(before: .newItem) {
+                Button("Go to…") { app.showingPalette = true }
+                    .keyboardShortcut("k")
+                Button("Go to Request…") { app.showingPalette = true }
+                    .keyboardShortcut("p")
+                Divider()
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Collection") { app.newCollection() }
                     .keyboardShortcut("n")

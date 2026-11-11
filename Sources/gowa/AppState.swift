@@ -125,6 +125,8 @@ final class AppState {
     /// Bumped when the jar changes so cookie views refresh.
     var cookieRevision = 0
     var showingCookies = false
+    var showingPalette = false
+    var showingHistory = false
     var gitStatus: GitStatus?
 
     func refreshGitStatus() {
