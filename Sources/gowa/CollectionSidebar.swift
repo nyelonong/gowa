@@ -218,6 +218,11 @@ struct CollectionSidebar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .dropDestination(for: String.self) { ids, _ in
+            guard let id = ids.first else { return false }
+            app.move(nodeID: id, toParent: nil, index: nil)
+            return true
+        }
     }
 
     private var emptyCollectionHint: some View {
@@ -279,6 +284,7 @@ struct SidebarRow: View {
     let node: SidebarNode
     var forceExpanded = false
     @State private var isExpanded = true
+    @State private var isDropTarget = false
 
     var body: some View {
         if node.isFolder {
@@ -288,9 +294,32 @@ struct SidebarRow: View {
                 }
             } label: {
                 folderLabel
+                    .draggable(node.id)
+                    .dropDestination(for: String.self) { ids, _ in
+                        guard let id = ids.first, id != node.id else { return false }
+                        app.move(nodeID: id, toParent: node.node.path, index: nil)
+                        isExpanded = true
+                        return true
+                    } isTargeted: { isDropTarget = $0 }
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(Color.accentColor, lineWidth: isDropTarget ? 2 : 0)
+                    )
             }
         } else {
             requestLabel
+                .draggable(node.id)
+                .dropDestination(for: String.self) { ids, _ in
+                    guard let id = ids.first, id != node.id else { return false }
+                    let parent = Array(node.node.path.dropLast())
+                    app.move(nodeID: id, toParent: parent.isEmpty ? nil : parent, index: node.node.path.last)
+                    return true
+                } isTargeted: { isDropTarget = $0 }
+                .overlay(alignment: .top) {
+                    if isDropTarget {
+                        Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: -3)
+                    }
+                }
                 .tag(node.id)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

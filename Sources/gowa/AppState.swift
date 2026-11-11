@@ -492,6 +492,19 @@ final class AppState {
         markDirtyAndRebuild()
     }
 
+    /// Drag-and-drop move; the selection follows the item it pointed at.
+    func move(nodeID: String, toParent parent: NodePath?, index: Int?) {
+        guard let doc = document else { return }
+        let source = nodeID.split(separator: ".").compactMap { Int($0) }
+        guard !source.isEmpty, let result = doc.move(from: source, toParent: parent, index: index) else { return }
+        if let selected = selectedRequestPath {
+            selectedRequestPath = OpenCollectionDocument.remap(selected, from: source, toParent: parent, index: index, result: result)
+        }
+        lastBodyByKey = [:]
+        diffContext = nil
+        markDirtyAndRebuild()
+    }
+
     private func markDirtyAndRebuild() {
         hasUnsavedChanges = true
         rebuildSidebar()

@@ -377,6 +377,56 @@ final class OpenCollectionDocument {
         writeItems(level, at: Array(path.dropLast()))
     }
 
+    /// Moves an item into `parent` (nil = top level) before the child at
+    /// `index` (counted before the move; nil or past the end = last). Returns
+    /// the item's new path, or nil when the move is invalid (into itself).
+    @discardableResult
+    func move(from source: NodePath, toParent parent: NodePath?, index: Int?) -> NodePath? {
+        let parentPath = parent ?? []
+        guard !source.isEmpty, item(at: source) != nil,
+              !(parentPath.count >= source.count && Array(parentPath.prefix(source.count)) == source),
+              parent == nil || isFolder(parentPath)
+        else { return nil }
+        guard let moved = item(at: source) else { return nil }
+        var target = index ?? Int.max
+        let sameParent = Array(source.dropLast()) == parentPath
+        if sameParent, let last = source.last, target > last { target -= 1 }
+
+        delete(at: source)
+        let newParent = Self.adjust(parentPath, removing: source)
+        var siblings = newParent.isEmpty ? (root["items"] as? [[String: Any]] ?? []) : (item(at: newParent)?["items"] as? [[String: Any]] ?? [])
+        target = max(0, min(target, siblings.count))
+        siblings.insert(moved, at: target)
+        writeItems(siblings, at: newParent)
+        return newParent + [target]
+    }
+
+    /// Where `path` ends up after a move, so selection can follow it.
+    nonisolated static func remap(_ path: NodePath, from source: NodePath, toParent parent: NodePath?, index: Int?, result: NodePath) -> NodePath {
+        if path.count >= source.count, Array(path.prefix(source.count)) == source {
+            return result + path.dropFirst(source.count)
+        }
+        var adjusted = adjust(path, removing: source)
+        let insertedParent = Array(result.dropLast())
+        if let slot = result.last, adjusted.count > insertedParent.count,
+           Array(adjusted.prefix(insertedParent.count)) == insertedParent,
+           adjusted[insertedParent.count] >= slot {
+            adjusted[insertedParent.count] += 1
+        }
+        return adjusted
+    }
+
+    /// `path` after the item at `removed` is deleted.
+    nonisolated static func adjust(_ path: NodePath, removing removed: NodePath) -> NodePath {
+        let depth = removed.count - 1
+        guard path.count > depth, Array(path.prefix(depth)) == Array(removed.prefix(depth)), path[depth] > removed[depth] else {
+            return path
+        }
+        var adjusted = path
+        adjusted[depth] -= 1
+        return adjusted
+    }
+
     private func append(_ entry: [String: Any], under parent: NodePath?) -> NodePath {
         if let parent {
             var parentItem = item(at: parent) ?? [:]
