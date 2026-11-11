@@ -304,8 +304,7 @@ struct ResponseView: View {
     }
 
     private func formatDuration(_ d: Duration) -> String {
-        let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
-        return String(format: "%.0f ms", ms)
+        d.millisecondsText
     }
 }
 

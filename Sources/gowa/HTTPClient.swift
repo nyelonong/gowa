@@ -77,7 +77,8 @@ enum HTTPError: LocalizedError {
 
 struct HTTPClient: Sendable {
     var followRedirects = true
-    var timeoutSeconds = 30
+    /// Seconds; 0 waits indefinitely.
+    var timeout: TimeInterval = 30
 
     func send(
         method: HTTPMethod,
@@ -95,7 +96,7 @@ struct HTTPClient: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
-        let timeout = timeoutSeconds > 0 ? TimeInterval(timeoutSeconds) : TimeInterval.greatestFiniteMagnitude
+        let timeout = timeout > 0 ? timeout : TimeInterval.greatestFiniteMagnitude
         request.timeoutInterval = timeout
         for (name, value) in headers where !name.isEmpty {
             request.setValue(value, forHTTPHeaderField: name)

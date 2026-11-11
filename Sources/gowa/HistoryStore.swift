@@ -28,10 +28,10 @@ final class HistoryStore {
         load()
     }
 
-    func record(method: HTTPMethod, url: String, body: String, status: Int?) {
+    func record(method: String, url: String, body: String, status: Int?) {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let entry = HistoryEntry(method: method.rawValue, url: trimmed, body: body, at: Date(), status: status)
+        let entry = HistoryEntry(method: method, url: trimmed, body: body, at: Date(), status: status)
         entries.insert(entry, at: 0)
         if entries.count > Self.maxEntries {
             entries.removeLast(entries.count - Self.maxEntries)

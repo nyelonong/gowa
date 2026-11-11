@@ -10,7 +10,7 @@ func curlCommand() {
         headers: [("Content-Type", "application/json"), ("Authorization", "Bearer tok")],
         body: "{\"name\": \"it's fine\"}",
         followRedirects: true,
-        timeout: 30
+        timeout: 30_000
     ))
 
     #expect(command.hasPrefix("curl"))

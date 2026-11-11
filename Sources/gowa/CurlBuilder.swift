@@ -20,7 +20,7 @@ enum CurlBuilder {
         }
 
         if let timeout = request.timeout, timeout > 0 {
-            parts.append("--max-time \(timeout)")
+            parts.append("--max-time \(String(format: "%g", Double(timeout) / 1000))")
         }
 
         if request.followRedirects {

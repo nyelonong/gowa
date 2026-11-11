@@ -89,62 +89,36 @@ enum CLIMode {
         var passed = 0
         var failed = 0
 
+        let executor = RequestExecutor(document: document, environment: envName)
         for node in requests {
             if let filter, !node.name.contains(filter) { continue }
             guard let snapshot = document.requestSnapshot(at: node.path) else { continue }
-
-            let resolution = document.resolveVariables(in: envName)
-            var variables = resolution.values
-            for (name, value) in sessionVariables { variables[name] = value }
-
-            let effective = document.effectiveRequest(at: node.path, from: snapshot, variables: variables)
-            let method = HTTPMethod(rawValue: effective.method) ?? .GET
-
+            let method = snapshot.method.uppercased()
             let clock = ContinuousClock()
             let start = clock.now
-            var outcomes: [OpenCollectionDocument.AssertionOutcome] = []
-            var failureDetail: String?
 
             do {
-                let client = HTTPClient(
-                    followRedirects: effective.followRedirects,
-                    timeoutSeconds: effective.timeout ?? 30
-                )
-                let result = try await client.send(
-                    method: method,
-                    urlText: effective.url,
-                    body: effective.body,
-                    headers: effective.headers
-                )
-                let elapsed = start.duration(to: clock.now)
-                let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
-
-                // Captures run before checks so chained tokens flow onward.
+                let outcome = try await executor.execute(snapshot, at: node.path, session: sessionVariables)
                 var capturedNotes: [String] = []
-                for capture in snapshot.captures where !capture.disabled {
-                    if let value = OpenCollectionDocument.evaluateCapture(capture.expression, body: result.body) {
-                        sessionVariables[capture.variableName] = value
-                        capturedNotes.append("{{\(capture.variableName)}} ← captured")
+                for capture in outcome.captures {
+                    if let value = capture.value {
+                        sessionVariables[capture.name] = value
+                        capturedNotes.append("{{\(capture.name)}} ← captured")
                     } else {
-                        capturedNotes.append("{{\(capture.variableName)}} ← NOT FOUND")
+                        capturedNotes.append("{{\(capture.name)}} ← NOT FOUND")
                     }
                 }
-
-                outcomes = snapshot.assertions
-                    .filter { !$0.disabled }
-                    .map { OpenCollectionDocument.evaluateAssertion($0, response: result) }
-                let checksFailed = outcomes.contains { !$0.pass }
-
+                let checksFailed = outcome.assertions.contains { !$0.pass }
                 let marker = checksFailed ? "✗" : "✔"
-                print("\(marker) \(method) \(node.name) — HTTP \(result.status) (\(String(format: "%.0f", ms)) ms)")
+                print("\(marker) \(method) \(node.name) — HTTP \(outcome.response.status) (\(outcome.response.elapsed.millisecondsText))")
                 for note in capturedNotes {
                     print("    \(note)")
                 }
-                for outcome in outcomes {
-                    let symbol = outcome.pass ? "✔" : "✗"
-                    var line = "      \(symbol) \(outcome.expression) \(outcome.op)"
-                    if let expected = outcome.expected { line += " [\(expected)]" }
-                    if let actual = outcome.actual { line += " — got [\(actual)]" }
+                for assertion in outcome.assertions {
+                    let symbol = assertion.pass ? "✔" : "✗"
+                    var line = "      \(symbol) \(assertion.expression) \(assertion.op)"
+                    if let expected = assertion.expected { line += " [\(expected)]" }
+                    if let actual = assertion.actual { line += " — got [\(actual)]" }
                     print(line)
                 }
                 if checksFailed {
@@ -152,15 +126,10 @@ enum CLIMode {
                 } else {
                     passed += 1
                 }
-                continue
             } catch {
-                failureDetail = error.localizedDescription
+                print("✗ \(method) \(node.name) — \(error.localizedDescription) (\(start.duration(to: clock.now).millisecondsText))")
+                failed += 1
             }
-
-            let elapsed = start.duration(to: clock.now)
-            let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
-            print("✗ \(method) \(node.name) — \(failureDetail ?? "failed") (\(String(format: "%.0f", ms)) ms)")
-            failed += 1
         }
 
         print("\n\(passed) passed, \(failed) failed of \(requests.count) requests")

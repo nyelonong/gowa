@@ -704,9 +704,7 @@ final class OpenCollectionDocument {
         if expression == "res.status" {
             actual = String(response.status)
         } else if expression == "res.time" {
-            let ms = Double(response.elapsed.components.seconds) * 1000
-                + Double(response.elapsed.components.attoseconds) / 1e18
-            actual = String(format: "%.0f", ms)
+            actual = String(format: "%.0f", response.elapsed.milliseconds)
         } else if expression == "res.body" {
             actual = String(data: response.body, encoding: .utf8)
         } else if expression.hasPrefix("res.body.") {

@@ -116,7 +116,6 @@ final class AppState {
     private var lastBodyByKey: [String: String] = [:]
 
     let history = HistoryStore()
-    private let client = HTTPClient()
 
     private static let lastCollectionKey = "gowa.lastCollection"
 
@@ -595,19 +594,12 @@ final class AppState {
     // MARK: - Send
 
     func send() {
-        guard !busy, var snapshot = draft else { return }
-        if let path = selectedRequestPath, let doc = document {
-            doc.applyInheritance(to: &snapshot, at: path)
-        }
-        let resolution = document?.resolveVariables(in: activeEnvironment) ?? (values: [:], missingSecrets: [])
-        var vars = resolution.values
-        for (name, value) in sessionVariables {
-            vars[name] = value // session captures win over environment values
-        }
-        let missing = Self.missingSecrets(usedBy: snapshot, missing: resolution.missingSecrets, variables: vars)
-        if !missing.isEmpty {
-            let names = missing.map { "\"\($0)\"" }.joined(separator: ", ")
-            errorText = "Secret \(names) has no stored value. Open Environments to set it — secret values live in the macOS Keychain, never in the collection file."
+        guard !busy, let snapshot = draft else { return }
+        let executor = RequestExecutor(document: document, environment: activeEnvironment)
+        do {
+            _ = try executor.prepare(snapshot, at: selectedRequestPath, session: sessionVariables)
+        } catch {
+            errorText = error.localizedDescription
             return
         }
         busy = true
@@ -616,39 +608,29 @@ final class AppState {
         errorText = nil
         lastAssertions = []
 
-        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
-        let method = HTTPMethod(rawValue: effective.method) ?? .GET
         let requestID = UUID()
         sendRequestID = requestID
+        let path = selectedRequestPath
 
         sendTask = Task { @MainActor [weak self] in
             guard let self else { return }
             guard self.sendRequestID == requestID else { return }
             do {
-                let client = HTTPClient(
-                    followRedirects: effective.followRedirects,
-                    timeoutSeconds: effective.timeout ?? 30
-                )
-                let response = try await client.send(
-                    method: method,
-                    urlText: effective.url,
-                    body: effective.body,
-                    headers: effective.headers
-                )
+                let outcome = try await executor.execute(snapshot, at: path, session: self.sessionVariables)
                 try Task.checkCancellation()
+                guard self.sendRequestID == requestID else { return }
+                let response = outcome.response
                 self.result = response
-                self.history.record(method: method, url: effective.url, body: effective.body, status: response.status)
-                self.runCaptures(for: snapshot, response: response)
-                if let key = selectedRequestPath?.map(String.init).joined(separator: ".") {
+                self.history.record(method: outcome.effective.method, url: outcome.effective.url, body: outcome.effective.body, status: response.status)
+                self.applyCaptures(outcome.captures)
+                if let key = path?.map(String.init).joined(separator: ".") {
                     let diffText = String(data: response.body.prefix(4 << 20), encoding: .utf8) ?? ""
-                    if let previous = lastBodyByKey[key], previous != diffText {
-                        diffContext = DiffContext(old: previous, new: diffText)
+                    if let previous = self.lastBodyByKey[key], previous != diffText {
+                        self.diffContext = DiffContext(old: previous, new: diffText)
                     }
-                    lastBodyByKey[key] = diffText
+                    self.lastBodyByKey[key] = diffText
                 }
-                self.lastAssertions = snapshot.assertions
-                    .filter { !$0.disabled }
-                    .map { OpenCollectionDocument.evaluateAssertion($0, response: response) }
+                self.lastAssertions = outcome.assertions
                 let bodyText = String(data: response.body.prefix(16 << 20), encoding: .utf8) ?? ""
                 let display = await Task.detached(priority: .userInitiated) {
                     BodyDisplay.build(response, bodyText: bodyText)
@@ -661,7 +643,9 @@ final class AppState {
                 self.errorText = "Request cancelled"
             } catch {
                 self.errorText = error.localizedDescription
-                self.history.record(method: method, url: effective.url, body: effective.body, status: nil)
+                if let effective = try? executor.prepare(snapshot, at: path, session: self.sessionVariables).effective {
+                    self.history.record(method: effective.method, url: effective.url, body: effective.body, status: nil)
+                }
             }
             guard self.sendRequestID == requestID else { return }
             self.sendRequestID = nil
@@ -683,25 +667,21 @@ final class AppState {
         busy = false
     }
 
-    private func runCaptures(for snapshot: OCRequestSnapshot, response: HTTPResult) {
-        var captured: [(name: String, value: String, stored: Bool)] = []
-        for capture in snapshot.captures where !capture.disabled {
-            guard let value = OpenCollectionDocument.evaluateCapture(capture.expression, body: response.body) else {
-                captured.append((capture.variableName, "<not found>", false))
+    private func applyCaptures(_ captures: [CaptureOutcome]) {
+        var shown: [(name: String, value: String, stored: Bool)] = []
+        for capture in captures {
+            guard let value = capture.value else {
+                shown.append((capture.name, "<not found>", false))
                 continue
             }
-            sessionVariables[capture.variableName] = value
-            let stored: Bool
-            if capture.scope == "environment" {
-                persistToEnvironment(name: capture.variableName, value: value)
-                stored = true
-            } else {
-                stored = false
+            sessionVariables[capture.name] = value
+            if capture.storesInEnvironment {
+                persistToEnvironment(name: capture.name, value: value)
             }
-            captured.append((capture.variableName, value, stored))
+            shown.append((capture.name, value, capture.storesInEnvironment))
         }
-        if !captured.isEmpty {
-            lastCaptures = captured
+        if !shown.isEmpty {
+            lastCaptures = shown
         }
     }
 
@@ -816,7 +796,6 @@ final class AppState {
 
     private func runSequence(_ paths: [NodePath]) async {
         runnerSkipRemaining = false
-        let vars = effectiveVariablesWithSession()
         for index in paths.indices {
             if runnerSkipRemaining || Task.isCancelled {
                 for remainingIndex in paths.indices.dropFirst(index) {
@@ -825,7 +804,7 @@ final class AppState {
                 break
             }
             runner.entries[index].state = .running
-            let outcome = await runOne(at: paths[index], variables: vars)
+            let outcome = await runOne(at: paths[index])
             runner.entries[index].state = outcome.state
             runner.entries[index].detail = outcome.detail
             runner.entries[index].elapsedText = outcome.elapsedText
@@ -841,14 +820,6 @@ final class AppState {
         runnerTask = nil
     }
 
-    private func effectiveVariablesWithSession() -> [String: String] {
-        var vars = document?.resolveVariables(in: activeEnvironment).values ?? [:]
-        for (name, value) in sessionVariables {
-            vars[name] = value // session captures win; chaining works inside a run
-        }
-        return vars
-    }
-
     private struct SingleRunOutcome {
         var state: RunnerEntry.State
         var detail: String?
@@ -856,60 +827,36 @@ final class AppState {
         var outcomes: [AssertionOutcomeView]
     }
 
-    private func runOne(at path: NodePath, variables: [String: String]) async -> SingleRunOutcome {
+    private func runOne(at path: NodePath) async -> SingleRunOutcome {
         guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else {
             return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
         }
-        let effective = doc.effectiveRequest(at: path, from: snapshot, variables: variables)
-        let method = HTTPMethod(rawValue: effective.method) ?? .GET
-
+        let executor = RequestExecutor(document: doc, environment: activeEnvironment)
         let clock = ContinuousClock()
         let start = clock.now
         do {
-            let client = HTTPClient(
-                followRedirects: effective.followRedirects,
-                timeoutSeconds: effective.timeout ?? 30
-            )
-            let response = try await client.send(
-                method: method,
-                urlText: effective.url,
-                body: effective.body,
-                headers: effective.headers
-            )
-            let elapsed = start.duration(to: clock.now)
-            let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
-            let elapsedText = String(format: "%.0f ms", ms)
-
-            runCaptures(for: snapshot, response: response)
-            snapshot.captures.forEach { _ in } // captures already in sessionVariables
-
-            let outcomes = snapshot.assertions
-                .filter { !$0.disabled }
-                .map { assertion -> AssertionOutcomeView in
-                    let outcome = OpenCollectionDocument.evaluateAssertion(assertion, response: response)
-                    return AssertionOutcomeView(
-                        expression: outcome.expression,
-                        op: outcome.op,
-                        expected: outcome.expected,
-                        actual: outcome.actual,
-                        pass: outcome.pass
-                    )
-                }
-            let failed = outcomes.contains { !$0.pass }
-            let detail = "HTTP \(response.status)"
+            let outcome = try await executor.execute(snapshot, at: path, session: sessionVariables)
+            applyCaptures(outcome.captures)
+            let outcomes = outcome.assertions.map { outcome in
+                AssertionOutcomeView(
+                    expression: outcome.expression,
+                    op: outcome.op,
+                    expected: outcome.expected,
+                    actual: outcome.actual,
+                    pass: outcome.pass
+                )
+            }
             return SingleRunOutcome(
-                state: failed ? .failed : .passed,
-                detail: detail,
-                elapsedText: elapsedText,
+                state: outcomes.contains { !$0.pass } ? .failed : .passed,
+                detail: "HTTP \(outcome.response.status)",
+                elapsedText: outcome.response.elapsed.millisecondsText,
                 outcomes: outcomes
             )
         } catch {
-            let elapsed = start.duration(to: clock.now)
-            let ms = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e18
             return SingleRunOutcome(
                 state: .error,
                 detail: error.localizedDescription,
-                elapsedText: String(format: "%.0f ms", ms),
+                elapsedText: start.duration(to: clock.now).millisecondsText,
                 outcomes: []
             )
         }
