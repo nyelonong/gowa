@@ -94,3 +94,17 @@ func missingSecretsUsedByRequest() {
     #expect(AppState.missingSecrets(usedBy: snapshot, missing: missing, variables: [:]) == ["accessToken", "bearer"])
     #expect(AppState.missingSecrets(usedBy: snapshot, missing: missing, variables: ["bearer": "captured"]) == ["accessToken"])
 }
+
+@MainActor
+@Test("a collection Gowa never saved keeps the same id across loads")
+func stableIDWithoutSavedID() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gowa-id-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let file = dir.appendingPathComponent("c.yml")
+    try "info:\n  name: C\nitems: []\n".write(to: file, atomically: true, encoding: .utf8)
+    let first = try OpenCollectionDocument.load(from: file).documentID
+    #expect(try OpenCollectionDocument.load(from: file).documentID == first)
+    try "info:\n  name: C\nextensions:\n  gowa:\n    id: kept\n".write(to: file, atomically: true, encoding: .utf8)
+    #expect(try OpenCollectionDocument.load(from: file).documentID == "kept")
+}

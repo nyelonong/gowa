@@ -173,6 +173,7 @@ final class OpenCollectionDocument {
         if doc.root["opencollection"] == nil {
             doc.root["opencollection"] = OpenCollectionDocument.specVersion
         }
+        doc.ensureStableID(for: url)
         return doc
     }
 
@@ -233,6 +234,22 @@ final class OpenCollectionDocument {
         extensions["gowa"] = gowa
         root["extensions"] = extensions
         return fresh
+    }
+
+    /// A file Gowa never saved has no `extensions.gowa.id`; derive one from its
+    /// path so Keychain secrets, cookies, tokens, and history stay attached
+    /// across launches. Saving writes it into the file.
+    func ensureStableID(for url: URL) {
+        let gowa = (root["extensions"] as? [String: Any])?["gowa"] as? [String: Any]
+        guard (gowa?["id"] as? String ?? "").isEmpty else { return }
+        let digest = Array(SHA256.hash(data: Data(url.standardizedFileURL.path.utf8)))
+        let id = UUID(uuid: (digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], (digest[6] & 0x0F) | 0x50, digest[7],
+                             (digest[8] & 0x3F) | 0x80, digest[9], digest[10], digest[11], digest[12], digest[13], digest[14], digest[15])).uuidString
+        var extensions = root["extensions"] as? [String: Any] ?? [:]
+        var block = gowa ?? [:]
+        block["id"] = id
+        extensions["gowa"] = block
+        root["extensions"] = extensions
     }
 
     func secretAccount(env: String, variable: String) -> String {
