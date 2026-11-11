@@ -83,3 +83,16 @@ func selectionFollowsDeleteAndDuplicate() {
     #expect(app.selectedRequestPath == [2])
     #expect(app.document?.requestSnapshot(at: app.selectedRequestPath!)?.name == "b")
 }
+
+@MainActor
+@Test("the folder runner only picks HTTP and GraphQL requests")
+func runnerSkipsStreamingItems() {
+    let app = AppState(restoringLastCollection: false)
+    app.document = OpenCollectionDocument(root: ["items": [
+        ["info": ["name": "h", "type": "http"], "http": ["method": "GET", "url": "https://x.test"]],
+        ["info": ["name": "g", "type": "graphql"], "graphql": ["url": "https://x.test/gql"]],
+        ["info": ["name": "w", "type": "websocket"], "websocket": ["url": "wss://x.test"]],
+        ["info": ["name": "r", "type": "grpc"], "grpc": ["url": "x.test:443"]],
+    ]])
+    #expect(app.runnerRequests(under: nil) == [[0], [1]])
+}

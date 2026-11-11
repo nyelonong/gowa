@@ -1207,7 +1207,7 @@ final class AppState {
         guard let doc = document else { return [] }
         let prefix = path ?? []
         return doc.enumerate()
-            .filter { !$0.isFolder }
+            .filter { !$0.isFolder && ($0.kind == "http" || $0.kind == "graphql") }
             .map(\.path)
             .filter { $0.count > prefix.count && Array($0.prefix(prefix.count)) == prefix }
     }

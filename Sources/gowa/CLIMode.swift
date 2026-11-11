@@ -85,7 +85,7 @@ enum CLIMode {
         print("Running \(document.name) (\(url.lastPathComponent))\(envName.map { " — env: \($0)" } ?? "")\n")
 
         var sessionVariables: [String: String] = [:]
-        let requests = document.enumerate().filter { !$0.isFolder && $0.url != nil }
+        let requests = document.enumerate().filter { !$0.isFolder && ($0.kind == "http" || $0.kind == "graphql") }
         var passed = 0
         var failed = 0
 
