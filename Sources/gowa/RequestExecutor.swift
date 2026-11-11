@@ -46,7 +46,7 @@ struct RequestExecutor {
 
     func variables(at path: NodePath?, session: [String: String]) -> (values: [String: String], missingSecrets: [String]) {
         let resolution = document?.resolveVariables(in: environment) ?? (values: [:], missingSecrets: [])
-        var values = resolution.values
+        var values = document?.layeredVariables(at: path, environment: resolution.values) ?? resolution.values
         for (name, value) in session {
             values[name] = value
         }

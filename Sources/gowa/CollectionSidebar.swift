@@ -196,6 +196,8 @@ struct CollectionSidebar: View {
             .accessibilityLabel("New")
 
             Menu {
+                Button("Collection Settings…") { app.editingDefaults = .collection }
+                Divider()
                 Button("Rename Collection…") { app.beginRenameCollection() }
                 Button("Open Collection…") { app.openCollectionPanel() }
                 if app.document?.url != nil {
@@ -317,6 +319,7 @@ struct SidebarRow: View {
         }
         .contextMenu {
             Button("Run all") { app.startRunner(under: node.node.path) }
+            Button("Folder Settings…") { app.editingDefaults = .folder(node.node.path) }
             Divider()
             Button("New Request") { app.addRequest(under: node.node.path) }
             Button("New Folder") { app.addFolder(under: node.node.path) }

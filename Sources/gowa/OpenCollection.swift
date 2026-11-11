@@ -89,6 +89,14 @@ struct OCRequestSnapshot: Sendable {
     var docs: String?
 }
 
+/// Collection- or folder-level `request` defaults that requests inherit.
+struct OCDefaults: Equatable, Sendable {
+    var headers: [OCHeader] = []
+    var auth: OAuthKind = .inherit
+    var variables: [OCVariable] = []
+    var docs: String?
+}
+
 // MARK: - Environments
 
 struct OCVariable: Equatable, Sendable, Identifiable {
@@ -534,23 +542,26 @@ final class OpenCollectionDocument {
         } else {
             http.removeValue(forKey: "body")
         }
-        switch snapshot.authKind {
-        case .none: http["auth"] = ["type": "none"]
-        case .inherit: http["auth"] = ["type": "inherit"]
-        case .basic(let username, let password):
-            http["auth"] = ["type": "basic", "username": username, "password": password]
-        case .bearer(let token):
-            http["auth"] = ["type": "bearer", "token": token]
-        case .apiKey(let key, let value, let placement):
-            http["auth"] = ["type": "apikey", "key": key, "value": value, "placement": placement]
-        case .preserved:
-            break // leave the original auth block untouched
+        if let auth = authDict(snapshot.authKind) {
+            http["auth"] = auth
         }
         var settings: [String: Any] = [:]
         if let follow = snapshot.settings.followRedirects { settings["followRedirects"] = follow }
         if let timeout = snapshot.settings.timeout { settings["timeout"] = timeout }
         if !settings.isEmpty { http["settings"] = settings } else { http.removeValue(forKey: "settings") }
         return http
+    }
+
+    /// Spec `auth` block; nil for `.preserved`, whose original block stays untouched.
+    private func authDict(_ kind: OAuthKind) -> [String: Any]? {
+        switch kind {
+        case .none: ["type": "none"]
+        case .inherit: ["type": "inherit"]
+        case .basic(let username, let password): ["type": "basic", "username": username, "password": password]
+        case .bearer(let token): ["type": "bearer", "token": token]
+        case .apiKey(let key, let value, let placement): ["type": "apikey", "key": key, "value": value, "placement": placement]
+        case .preserved: nil
+        }
     }
 
     private func readAuthDict(_ auth: [String: Any]) -> OAuthKind {
@@ -773,8 +784,104 @@ final class OpenCollectionDocument {
         return x == y
     }
 
-    /// Substitute `{{name}}` placeholders; unknown variables stay literal.
     // MARK: - Request defaults inheritance
+
+    func isFolder(_ path: NodePath) -> Bool {
+        (item(at: path)?["info"] as? [String: Any])?["type"] as? String == "folder"
+    }
+
+    /// Defaults for a folder, or for the whole collection when `path` is nil.
+    func defaults(at path: NodePath?) -> OCDefaults {
+        let owner = path.flatMap { item(at: $0) } ?? root
+        let request = owner["request"] as? [String: Any] ?? [:]
+        return OCDefaults(
+            headers: (request["headers"] as? [[String: Any]] ?? []).map {
+                OCHeader(name: $0["name"] as? String ?? "", value: $0["value"] as? String ?? "", disabled: $0["disabled"] as? Bool ?? false)
+            },
+            auth: (request["auth"] as? [String: Any]).map(readAuthDict) ?? .inherit,
+            variables: Self.readVariables(request["variables"]),
+            docs: Self.readDocs(owner["docs"])
+        )
+    }
+
+    func updateDefaults(at path: NodePath?, _ defaults: OCDefaults) {
+        var owner = path.flatMap { item(at: $0) } ?? root
+        var request = owner["request"] as? [String: Any] ?? [:]
+        if defaults.headers.isEmpty {
+            request.removeValue(forKey: "headers")
+        } else {
+            request["headers"] = defaults.headers.map { ["name": $0.name, "value": $0.value, "disabled": $0.disabled] }
+        }
+        switch defaults.auth {
+        case .inherit: request.removeValue(forKey: "auth")
+        case .preserved: break
+        default: request["auth"] = authDict(defaults.auth)
+        }
+        if defaults.variables.isEmpty {
+            request.removeValue(forKey: "variables")
+        } else {
+            request["variables"] = defaults.variables.map { variable -> [String: Any] in
+                var entry: [String: Any] = ["name": variable.name, "value": variable.value]
+                if variable.disabled { entry["disabled"] = true }
+                return entry
+            }
+        }
+        if request.isEmpty { owner.removeValue(forKey: "request") } else { owner["request"] = request }
+        if let docs = defaults.docs, !docs.isEmpty {
+            owner["docs"] = docs
+        } else if owner["docs"] is String {
+            owner.removeValue(forKey: "docs")
+        }
+        if let path { write(owner, at: path) } else { root = owner }
+    }
+
+    /// Variable entries hold a string or a typed `{type, data}` value.
+    nonisolated static func readVariables(_ raw: Any?) -> [OCVariable] {
+        (raw as? [[String: Any]] ?? []).map { entry in
+            let value: String
+            if let text = entry["value"] as? String {
+                value = text
+            } else if let typed = entry["value"] as? [String: Any] {
+                value = typed["data"] as? String ?? ""
+            } else {
+                value = ""
+            }
+            return OCVariable(
+                name: entry["name"] as? String ?? "",
+                value: value,
+                secret: false,
+                disabled: entry["disabled"] as? Bool ?? false
+            )
+        }
+    }
+
+    nonisolated static func readDocs(_ raw: Any?) -> String? {
+        if let text = raw as? String { return text }
+        return (raw as? [String: Any])?["content"] as? String
+    }
+
+    /// Collection, folder (outermost first), and request variables in
+    /// increasing precedence; environment values slot in after the collection.
+    func layeredVariables(at path: NodePath?, environment: [String: String]) -> [String: String] {
+        var values: [String: String] = [:]
+        func apply(_ variables: [OCVariable]) {
+            for variable in variables where !variable.disabled && !variable.name.isEmpty {
+                values[variable.name] = variable.value
+            }
+        }
+        apply(defaults(at: nil).variables)
+        values.merge(environment) { _, new in new }
+        guard let path else { return values }
+        for depth in 1..<max(path.count, 1) {
+            let folder = Array(path.prefix(depth))
+            if isFolder(folder) { apply(defaults(at: folder).variables) }
+        }
+        if let item = item(at: path) {
+            apply(Self.readVariables((item["runtime"] as? [String: Any])?["variables"]))
+        }
+        return values
+    }
+
 
     /// Folder-level and collection-level request defaults (`request` blocks),
     /// ordered outermost → innermost.
@@ -796,14 +903,13 @@ final class OpenCollectionDocument {
     }
 
     /// Resolve `inherit` auth: walk from the innermost folder outward; the
-    /// nearest level defining executable auth (other than none/inherit)
-    /// wins.
+    /// nearest level that sets auth wins, and an explicit `none` stops the walk.
     func resolvedAuth(at path: NodePath) -> OAuthKind? {
         for defaults in defaultChain(for: path).reversed() {
             guard let auth = defaults["auth"] as? [String: Any] else { continue }
             let kind = readAuthDict(auth)
             switch kind {
-            case .none, .inherit, .preserved: continue
+            case .inherit, .preserved: continue
             default: return kind
             }
         }

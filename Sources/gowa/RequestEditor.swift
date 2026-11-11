@@ -291,72 +291,24 @@ struct ParamRows: View {
     let draft: OCRequestSnapshot
     let commit: RequestCommitter
 
-    private func update(_ change: (inout OCRequestSnapshot) -> Void) {
-        commit(change)
-    }
-
     var body: some View {
-        FieldTable {
-            TableRow(isHeader: true) {
-                Color.clear.frame(width: 18, height: 1)
-                Text("Type")
-                    .frame(width: 84, alignment: .leading)
-                Text("Name")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Value")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(width: 18, height: 1)
+        KeyValueTable(
+            rows: draft.params.map(\.kvRow),
+            noun: "parameter",
+            extraTitle: "Type",
+            variables: app.variableScope,
+            onEdit: { edit in commit { $0.params.apply(edit) } }
+        ) { index in
+            Picker("", selection: Binding(
+                get: { draft.params[index].kind },
+                set: { kind in commit { $0.params[index].kind = kind } }
+            )) {
+                Text("Query").tag("query")
+                Text("Path").tag("path")
             }
-
-            ForEach(draft.params.indices, id: \.self) { index in
-                TableRow {
-                    Toggle("", isOn: Binding(
-                        get: { !draft.params[index].disabled },
-                        set: { newValue in update { snapshot in snapshot.params[index].disabled = !newValue } }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .frame(width: 18)
-                    .accessibilityLabel("Enable parameter")
-
-                    Picker("", selection: Binding(
-                        get: { draft.params[index].kind },
-                        set: { newValue in update { snapshot in snapshot.params[index].kind = newValue } }
-                    )) {
-                        Text("Query").tag("query")
-                        Text("Path").tag("path")
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .frame(width: 84)
-                    .accessibilityLabel("Parameter location")
-
-                    TextField("Name", text: Binding(
-                        get: { draft.params[index].name },
-                        set: { newValue in update { snapshot in snapshot.params[index].name = newValue } }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
-                    .accessibilityLabel("Parameter name")
-
-                    TextField("Value", text: Binding(
-                        get: { draft.params[index].value },
-                        set: { newValue in update { snapshot in snapshot.params[index].value = newValue } }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
-                    .accessibilityLabel("Parameter value")
-
-                    RemoveRowButton(label: "Remove parameter") {
-                        update { snapshot in snapshot.params.remove(at: index) }
-                    }
-                }
-                .opacity(draft.params[index].disabled ? 0.5 : 1)
-            }
-
-            AddRowButton(label: "Add parameter") {
-                update { snapshot in snapshot.params.append(OCParam(name: "", value: "", kind: "query", disabled: false)) }
-            }
+            .labelsHidden()
+            .controlSize(.small)
+            .accessibilityLabel("Parameter location")
         }
         .padding(16)
     }
@@ -369,59 +321,13 @@ struct HeaderRows: View {
     let draft: OCRequestSnapshot
     let commit: RequestCommitter
 
-    private func update(_ change: (inout OCRequestSnapshot) -> Void) {
-        commit(change)
-    }
-
     var body: some View {
-        FieldTable {
-            TableRow(isHeader: true) {
-                Color.clear.frame(width: 18, height: 1)
-                Text("Name")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Value")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(width: 18, height: 1)
-            }
-
-            ForEach(draft.headers.indices, id: \.self) { index in
-                TableRow {
-                    Toggle("", isOn: Binding(
-                        get: { !draft.headers[index].disabled },
-                        set: { newValue in update { snapshot in snapshot.headers[index].disabled = !newValue } }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .frame(width: 18)
-                    .accessibilityLabel("Enable header")
-
-                    TextField("Name", text: Binding(
-                        get: { draft.headers[index].name },
-                        set: { newValue in update { snapshot in snapshot.headers[index].name = newValue } }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
-                    .accessibilityLabel("Header name")
-
-                    TextField("Value", text: Binding(
-                        get: { draft.headers[index].value },
-                        set: { newValue in update { snapshot in snapshot.headers[index].value = newValue } }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
-                    .accessibilityLabel("Header value")
-
-                    RemoveRowButton(label: "Remove header") {
-                        update { snapshot in snapshot.headers.remove(at: index) }
-                    }
-                }
-                .opacity(draft.headers[index].disabled ? 0.5 : 1)
-            }
-
-            AddRowButton(label: "Add header") {
-                update { snapshot in snapshot.headers.append(OCHeader(name: "", value: "", disabled: false)) }
-            }
-        }
+        KeyValueTable(
+            rows: draft.headers.map(\.kvRow),
+            noun: "header",
+            variables: app.variableScope,
+            onEdit: { edit in commit { $0.headers.apply(edit) } }
+        )
         .padding(16)
     }
 }
@@ -433,165 +339,11 @@ struct AuthSection: View {
     let draft: OCRequestSnapshot
     let commit: RequestCommitter
 
-    private func update(_ change: (inout OCRequestSnapshot) -> Void) {
-        commit(change)
-    }
-
-    private var kind: AuthKindUI {
-        switch draft.authKind {
-        case .none: .none
-        case .inherit: .inherit
-        case .basic: .basic
-        case .bearer: .bearer
-        case .apiKey: .apiKey
-        case .preserved: .preserved
-        }
-    }
-
-    enum AuthKindUI: String, CaseIterable, Identifiable {
-        case none = "None"
-        case inherit = "Inherit"
-        case basic = "Basic"
-        case bearer = "Bearer"
-        case apiKey = "API Key"
-        case preserved = "Custom"
-        var id: String { rawValue }
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Auth type", selection: Binding(
-                get: { kind },
-                set: { newValue in
-                    commit { snapshot in
-                        switch newValue {
-                        case .none: snapshot.authKind = .none
-                        case .inherit: snapshot.authKind = .inherit
-                        case .basic: snapshot.authKind = .basic(username: "", password: "")
-                        case .bearer: snapshot.authKind = .bearer(token: "")
-                        case .apiKey: snapshot.authKind = .apiKey(key: "", value: "", placement: "header")
-                        case .preserved: break // not settable
-                        }
-                    }
-                }
-            )) {
-                ForEach(AuthKindUI.allCases) { kind in
-                    Text(kind.rawValue).tag(kind)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityLabel("Auth type")
-
-            switch kind {
-            case .basic:
-                fieldLabel("Username")
-                TextField("Supports {{vars}}", text: Binding(
-                    get: { usernameOf(draft.authKind) },
-                    set: { newValue in commit { snapshot in snapshot.authKind = .basic(username: newValue, password: passwordOf(snapshot.authKind)) } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 460)
-                fieldLabel("Password")
-                SecureField("Supports {{vars}}", text: Binding(
-                    get: { passwordOf(draft.authKind) },
-                    set: { newValue in commit { snapshot in snapshot.authKind = .basic(username: usernameOf(snapshot.authKind), password: newValue) } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 460)
-            case .bearer:
-                fieldLabel("Token")
-                TextField("Supports {{vars}}", text: Binding(
-                    get: { tokenOf(draft.authKind) },
-                    set: { newValue in commit { snapshot in snapshot.authKind = .bearer(token: newValue) } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 460)
-            case .apiKey:
-                fieldLabel("Key name")
-                TextField("Key name", text: Binding(
-                    get: { apiKeyOf(draft.authKind).key },
-                    set: { newValue in commit { snapshot in
-                        let current = apiKeyOf(snapshot.authKind)
-                        snapshot.authKind = .apiKey(key: newValue, value: current.value, placement: current.placement)
-                    } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 460)
-                fieldLabel("Value")
-                TextField("Value", text: Binding(
-                    get: { apiKeyOf(draft.authKind).value },
-                    set: { newValue in commit { snapshot in
-                        let current = apiKeyOf(snapshot.authKind)
-                        snapshot.authKind = .apiKey(key: current.key, value: newValue, placement: current.placement)
-                    } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 460)
-                fieldLabel("Add to")
-                Picker("Add to", selection: Binding(
-                    get: { apiKeyOf(draft.authKind).placement },
-                    set: { newValue in commit { snapshot in
-                        let current = apiKeyOf(snapshot.authKind)
-                        snapshot.authKind = .apiKey(key: current.key, value: current.value, placement: newValue)
-                    } }
-                )) {
-                    Text("Header").tag("header")
-                    Text("Query").tag("query")
-                }
-                .labelsHidden()
-                .fixedSize()
-            case .none:
-                Text("No authentication is applied.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .inherit:
-                Text("Inherits auth from the parent folder or collection at send time (v3 preserves this flag; folder-level defaults execution arrives later).")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .preserved:
-                Text("This request uses an auth type Gowa can render but not edit (e.g. OAuth2). It is preserved in the YAML exactly as stored.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+        AuthEditor(auth: draft.authKind, variables: app.variableScope) { auth in
+            commit { $0.authKind = auth }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-    }
-
-    private func fieldLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
-            .padding(.bottom, -3)
-    }
-
-    private func usernameOf(_ kind: OAuthKind) -> String {
-        if case .basic(let username, _) = kind { return username }
-        return ""
-    }
-
-    private func passwordOf(_ kind: OAuthKind) -> String {
-        if case .basic(_, let password) = kind { return password }
-        return ""
-    }
-
-    private func tokenOf(_ kind: OAuthKind) -> String {
-        if case .bearer(let token) = kind { return token }
-        return ""
-    }
-
-    private func apiKeyOf(_ kind: OAuthKind) -> (key: String, value: String, placement: String) {
-        if case .apiKey(let key, let value, let placement) = kind {
-            return (key, value, placement)
-        }
-        return ("", "", "header")
     }
 }
 

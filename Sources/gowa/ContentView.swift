@@ -58,6 +58,12 @@ struct ContentView: View {
         )) {
             CurlImportSheet(app: app)
         }
+        .sheet(item: Binding(
+            get: { app.editingDefaults },
+            set: { app.editingDefaults = $0 }
+        )) { target in
+            DefaultsSheet(app: app, target: target)
+        }
         .sheet(isPresented: Binding(
             get: { app.showingRunner },
             set: { app.showingRunner = $0 }

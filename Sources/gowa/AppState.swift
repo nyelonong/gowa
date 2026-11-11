@@ -137,6 +137,53 @@ final class AppState {
     }
 
     var canSend: Bool { draft != nil && !busy && sendValidationMessage == nil }
+
+    /// Variables `{{name}}` resolves to for the selected request (or folder).
+    var variableScope: VariableScope {
+        let executor = RequestExecutor(document: document, environment: activeEnvironment)
+        let resolution = executor.variables(at: selectedRequestPath, session: sessionVariables)
+        return VariableScope(values: resolution.values, secretNames: Set(resolution.missingSecrets))
+    }
+
+    // MARK: - Folder and collection defaults
+
+    enum DefaultsTarget: Identifiable, Equatable {
+        case collection
+        case folder(NodePath)
+
+        var id: String {
+            switch self {
+            case .collection: "collection"
+            case .folder(let path): path.map(String.init).joined(separator: ".")
+            }
+        }
+
+        var path: NodePath? {
+            if case .folder(let path) = self { return path }
+            return nil
+        }
+    }
+
+    var editingDefaults: DefaultsTarget?
+
+    func defaults(for target: DefaultsTarget) -> OCDefaults {
+        document?.defaults(at: target.path) ?? OCDefaults()
+    }
+
+    func updateDefaults(_ defaults: OCDefaults, for target: DefaultsTarget) {
+        guard let doc = document else { return }
+        doc.updateDefaults(at: target.path, defaults)
+        hasUnsavedChanges = true
+    }
+
+    func defaultsTitle(for target: DefaultsTarget) -> String {
+        switch target {
+        case .collection:
+            return document?.name ?? "Collection"
+        case .folder(let path):
+            return document?.enumerate().first { $0.path == path }?.name ?? "Folder"
+        }
+    }
     // MARK: - Collection lifecycle
 
     func newCollection() {
