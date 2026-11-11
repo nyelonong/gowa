@@ -23,16 +23,29 @@ struct ExecutionOutcome: Sendable {
     var response: HTTPResult
     var captures: [CaptureOutcome]
     var assertions: [OpenCollectionDocument.AssertionOutcome]
+    var tests: [ScriptTestResult] = []
+    var logs: [ScriptLog] = []
+    /// Values scripts set with `bru.setVar` (session) and `bru.setEnvVar` (environment).
+    var runtimeVariables: [String: String] = [:]
+    var environmentVariables: [String: String] = [:]
+    var scriptError: String?
+
+    var passed: Bool {
+        assertions.allSatisfy(\.pass) && tests.allSatisfy(\.passed) && scriptError == nil
+    }
 }
 
 enum ExecutionError: LocalizedError {
     case missingSecrets([String])
+    case script(String, logs: [ScriptLog])
 
     var errorDescription: String? {
         switch self {
         case .missingSecrets(let names):
             let list = names.map { "\"\($0)\"" }.joined(separator: ", ")
             return "Secret \(list) has no stored value. Open Environments to set it — secret values live in the macOS Keychain, never in the collection file."
+        case .script(let message, _):
+            return "The request was not sent: \(message)"
         }
     }
 }
@@ -55,10 +68,10 @@ struct RequestExecutor {
         return (values, resolution.missingSecrets)
     }
 
-    func prepare(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) throws -> (snapshot: OCRequestSnapshot, effective: AppState.EffectiveRequest, variables: [String: String]) {
+    func prepare(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String], headersInherited: Bool = false) throws -> (snapshot: OCRequestSnapshot, effective: AppState.EffectiveRequest, variables: [String: String]) {
         var snapshot = snapshot
         if let path, let document {
-            document.applyInheritance(to: &snapshot, at: path)
+            document.applyInheritance(to: &snapshot, at: path, headers: !headersInherited)
         }
         let resolution = variables(at: path, session: session)
         let missing = AppState.missingSecrets(usedBy: snapshot, missing: resolution.missingSecrets, variables: resolution.values)
@@ -84,8 +97,48 @@ struct RequestExecutor {
         }
     }
 
+    func scripts(_ snapshot: OCRequestSnapshot, at path: NodePath?, types: [String]) -> [OCScript] {
+        types.flatMap { type in
+            (document?.inheritedScripts(at: path, type: type) ?? []) + snapshot.scripts.filter { $0.type == type }
+        }
+    }
+
     func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) async throws -> ExecutionOutcome {
-        let prepared = try prepare(snapshot, at: path, session: session)
+        var session = session
+        var snapshot = snapshot
+        var scriptLogs: [ScriptLog] = []
+        var runtimeSets: [String: String] = [:]
+        var environmentSets: [String: String] = [:]
+
+        let before = scripts(snapshot, at: path, types: ["before-request"])
+        if !before.isEmpty {
+            let initial = try prepare(snapshot, at: path, session: session)
+            let request = ScriptRequest(
+                name: snapshot.name,
+                method: initial.snapshot.method,
+                url: snapshot.url,
+                headers: initial.snapshot.headers,
+                body: snapshot.bodyData
+            )
+            let outcome = ScriptRunner.run(before, request: request, response: nil, variables: initial.variables)
+            scriptLogs += outcome.logs
+            if let error = outcome.error {
+                throw ExecutionError.script(error, logs: scriptLogs)
+            }
+            if let changed = outcome.request, changed != request {
+                snapshot.method = changed.method
+                snapshot.url = changed.url
+                snapshot.headers = changed.headers
+                snapshot.bodyData = changed.body
+            }
+            runtimeSets = outcome.runtimeVariables
+            environmentSets = outcome.environmentVariables
+            session.merge(environmentSets) { _, new in new }
+            session.merge(runtimeSets) { _, new in new }
+        }
+
+        // Scripts saw (and may have removed) the inherited headers already.
+        let prepared = try prepare(snapshot, at: path, session: session, headersInherited: !before.isEmpty)
         var effective = prepared.effective
         if case .oauth2(let config) = prepared.snapshot.authKind {
             try await applyOAuth2(config.interpolated(prepared.variables), to: &effective)
@@ -129,6 +182,26 @@ struct RequestExecutor {
             .filter { !$0.disabled }
             .map { OpenCollectionDocument.evaluateAssertion($0, response: response) }
 
-        return ExecutionOutcome(effective: effective, response: response, captures: captures, assertions: assertions)
+        var outcome = ExecutionOutcome(
+            effective: effective,
+            response: response,
+            captures: captures,
+            assertions: assertions,
+            logs: scriptLogs,
+            runtimeVariables: runtimeSets,
+            environmentVariables: environmentSets
+        )
+        let after = scripts(prepared.snapshot, at: path, types: ["after-response", "tests"])
+        if !after.isEmpty {
+            var variables = prepared.variables
+            for capture in captures { if let value = capture.value { variables[capture.name] = value } }
+            let result = ScriptRunner.run(after, request: nil, response: response, variables: variables)
+            outcome.tests = result.tests
+            outcome.logs += result.logs
+            outcome.runtimeVariables.merge(result.runtimeVariables) { _, new in new }
+            outcome.environmentVariables.merge(result.environmentVariables) { _, new in new }
+            outcome.scriptError = result.error
+        }
+        return outcome
     }
 }

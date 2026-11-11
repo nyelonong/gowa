@@ -108,7 +108,9 @@ enum CLIMode {
                         capturedNotes.append("{{\(capture.name)}} ← NOT FOUND")
                     }
                 }
-                let checksFailed = outcome.assertions.contains { !$0.pass }
+                for (name, value) in outcome.environmentVariables { sessionVariables[name] = value }
+                for (name, value) in outcome.runtimeVariables { sessionVariables[name] = value }
+                let checksFailed = !outcome.passed
                 let marker = checksFailed ? "✗" : "✔"
                 print("\(marker) \(method) \(node.name) — HTTP \(outcome.response.status) (\(outcome.response.elapsed.millisecondsText))")
                 for note in capturedNotes {
@@ -120,6 +122,15 @@ enum CLIMode {
                     if let expected = assertion.expected { line += " [\(expected)]" }
                     if let actual = assertion.actual { line += " — got [\(actual)]" }
                     print(line)
+                }
+                for test in outcome.tests {
+                    print("      \(test.passed ? "✔" : "✗") \(test.name)\(test.error.map { " — \($0)" } ?? "")")
+                }
+                if let scriptError = outcome.scriptError {
+                    print("      ✗ \(scriptError)")
+                }
+                for log in outcome.logs {
+                    print("      [\(log.level)] \(log.message)")
                 }
                 if checksFailed {
                     failed += 1

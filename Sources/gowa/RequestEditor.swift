@@ -45,6 +45,7 @@ private struct EditorContent: View {
         case body = "Body"
         case captures = "Captures"
         case checks = "Checks"
+        case scripts = "Scripts"
         case settings = "Settings"
 
         var id: String { rawValue }
@@ -218,6 +219,7 @@ private struct EditorContent: View {
         case .headers: draft.headers.filter { !$0.disabled }.count
         case .captures: draft.captures.filter { !$0.disabled }.count
         case .checks: draft.assertions.filter { !$0.disabled }.count
+        case .scripts: draft.scripts.filter { !$0.code.isEmpty }.count
         case .auth, .body, .settings: 0
         }
     }
@@ -232,6 +234,9 @@ private struct EditorContent: View {
         case .body: BodySection(app: app, draft: draft, commit: committer)
         case .captures: ScrollView { CaptureRows(app: app, draft: draft, commit: committer) }
         case .checks: ScrollView { CheckRows(app: app, draft: draft, commit: committer) }
+        case .scripts:
+            ScriptsEditor(scripts: draft.scripts) { scripts in commit { $0.scripts = scripts } }
+                .padding(16)
         case .settings: ScrollView { SettingsSection(app: app, draft: draft, commit: committer) }
         }
     }

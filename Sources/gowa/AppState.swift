@@ -107,6 +107,9 @@ final class AppState {
     var sessionVariables: [String: String] = [:]
     var lastCaptures: [(name: String, value: String, stored: Bool)] = []
     var lastAssertions: [OpenCollectionDocument.AssertionOutcome] = []
+    var lastTests: [ScriptTestResult] = []
+    var lastLogs: [ScriptLog] = []
+    var lastScriptError: String?
 
     struct DiffContext: Sendable {
         var old: String
@@ -378,6 +381,9 @@ final class AppState {
             errorText = nil
             lastCaptures = []
             lastAssertions = []
+            lastTests = []
+            lastLogs = []
+            lastScriptError = nil
             diffContext = nil
         } else {
             // Folder selected: keep request selection independent.
@@ -714,6 +720,9 @@ final class AppState {
         bodyDisplay = nil
         errorText = nil
         lastAssertions = []
+        lastTests = []
+        lastLogs = []
+        lastScriptError = nil
 
         let requestID = UUID()
         sendRequestID = requestID
@@ -730,6 +739,10 @@ final class AppState {
                 self.result = response
                 self.history.record(method: outcome.effective.method, url: outcome.effective.url, body: outcome.effective.body, status: response.status)
                 self.applyCaptures(outcome.captures)
+                self.applyScriptVariables(outcome)
+                self.lastTests = outcome.tests
+                self.lastLogs = outcome.logs
+                self.lastScriptError = outcome.scriptError
                 if let key = path?.map(String.init).joined(separator: ".") {
                     let diffText = String(data: response.body.prefix(4 << 20), encoding: .utf8) ?? ""
                     if let previous = self.lastBodyByKey[key], previous != diffText {
@@ -750,6 +763,7 @@ final class AppState {
                 self.errorText = "Request cancelled"
             } catch {
                 self.errorText = error.localizedDescription
+                if case ExecutionError.script(_, let logs) = error { self.lastLogs = logs }
                 if let effective = try? executor.prepare(snapshot, at: path, session: self.sessionVariables).effective {
                     self.history.record(method: effective.method, url: effective.url, body: effective.body, status: nil)
                 }
@@ -789,6 +803,16 @@ final class AppState {
         }
         if !shown.isEmpty {
             lastCaptures = shown
+        }
+    }
+
+    private func applyScriptVariables(_ outcome: ExecutionOutcome) {
+        for (name, value) in outcome.runtimeVariables {
+            sessionVariables[name] = value
+        }
+        for (name, value) in outcome.environmentVariables {
+            sessionVariables[name] = value
+            persistToEnvironment(name: name, value: value)
         }
     }
 
@@ -944,7 +968,8 @@ final class AppState {
         do {
             let outcome = try await executor.execute(snapshot, at: path, session: sessionVariables)
             applyCaptures(outcome.captures)
-            let outcomes = outcome.assertions.map { outcome in
+            applyScriptVariables(outcome)
+            var outcomes = outcome.assertions.map { outcome in
                 AssertionOutcomeView(
                     expression: outcome.expression,
                     op: outcome.op,
@@ -953,8 +978,14 @@ final class AppState {
                     pass: outcome.pass
                 )
             }
+            outcomes += outcome.tests.map {
+                AssertionOutcomeView(expression: $0.name, op: "test", expected: nil, actual: $0.error, pass: $0.passed)
+            }
+            if let scriptError = outcome.scriptError {
+                outcomes.append(AssertionOutcomeView(expression: "script", op: "error", expected: nil, actual: scriptError, pass: false))
+            }
             return SingleRunOutcome(
-                state: outcomes.contains { !$0.pass } ? .failed : .passed,
+                state: outcome.passed ? .passed : .failed,
                 detail: "HTTP \(outcome.response.status)",
                 elapsedText: outcome.response.elapsed.millisecondsText,
                 outcomes: outcomes

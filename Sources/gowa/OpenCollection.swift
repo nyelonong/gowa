@@ -103,8 +103,18 @@ struct OCRequestSnapshot: Sendable {
     var filePath: String = ""
     var fileContentType: String = ""
     var graphqlVariables: String = ""
+    var scripts: [OCScript] = []
 
     var isGraphQL: Bool { bodyType == "graphql" }
+
+    func script(_ type: String) -> String {
+        scripts.first { $0.type == type }?.code ?? ""
+    }
+
+    mutating func setScript(_ type: String, _ code: String) {
+        scripts.removeAll { $0.type == type }
+        if !code.isEmpty { scripts.append(OCScript(type: type, code: code)) }
+    }
 }
 
 /// Collection- or folder-level `request` defaults that requests inherit.
@@ -113,6 +123,7 @@ struct OCDefaults: Equatable, Sendable {
     var auth: OAuthKind = .inherit
     var variables: [OCVariable] = []
     var docs: String?
+    var scripts: [OCScript] = []
 }
 
 // MARK: - Environments
@@ -441,6 +452,7 @@ final class OpenCollectionDocument {
             assertions: Self.readAssertions(item),
             docs: Self.readDocs(item["docs"])
         )
+        snapshot.scripts = Self.readScripts((item["runtime"] as? [String: Any])?["scripts"])
         if isGraphQL {
             let body = Self.selectedVariant(http["body"], key: "body") ?? [:]
             snapshot.bodyType = "graphql"
@@ -619,6 +631,8 @@ final class OpenCollectionDocument {
         } else {
             runtime["assertions"] = checks
         }
+
+        Self.writeScripts(snapshot.scripts, into: &runtime)
 
         if runtime.isEmpty {
             item.removeValue(forKey: "runtime")
@@ -921,7 +935,8 @@ final class OpenCollectionDocument {
             },
             auth: (request["auth"] as? [String: Any]).map(readAuthDict) ?? .inherit,
             variables: Self.readVariables(request["variables"]),
-            docs: Self.readDocs(owner["docs"])
+            docs: Self.readDocs(owner["docs"]),
+            scripts: Self.readScripts(request["scripts"])
         )
     }
 
@@ -947,6 +962,7 @@ final class OpenCollectionDocument {
                 return entry
             }
         }
+        Self.writeScripts(defaults.scripts, into: &request)
         if request.isEmpty { owner.removeValue(forKey: "request") } else { owner["request"] = request }
         if let docs = defaults.docs, !docs.isEmpty {
             owner["docs"] = docs
@@ -973,6 +989,31 @@ final class OpenCollectionDocument {
                 secret: false,
                 disabled: entry["disabled"] as? Bool ?? false
             )
+        }
+    }
+
+    nonisolated static let editableScriptTypes: Set<String> = ["before-request", "after-response", "tests"]
+
+    /// Gowa edits only spec-shaped `{type, code}` entries of these types.
+    nonisolated static func isEditableScript(_ entry: [String: Any]) -> Bool {
+        editableScriptTypes.contains(entry["type"] as? String ?? "") && entry["code"] is String
+    }
+
+    nonisolated static func readScripts(_ raw: Any?) -> [OCScript] {
+        (raw as? [[String: Any]] ?? []).filter(isEditableScript).map { entry in
+            OCScript(type: entry["type"] as! String, code: entry["code"] as! String)
+        }
+    }
+
+    /// Replaces the scripts Gowa edits and keeps the rest (hooks, gRPC
+    /// stages, entries in shapes Gowa doesn't read).
+    nonisolated static func writeScripts(_ scripts: [OCScript], into container: inout [String: Any]) {
+        let kept = (container["scripts"] as? [[String: Any]] ?? []).filter { !isEditableScript($0) }
+        let ours = scripts.filter { !$0.code.isEmpty }.map { ["type": $0.type, "code": $0.code] as [String: Any] }
+        if kept.isEmpty && ours.isEmpty {
+            container.removeValue(forKey: "scripts")
+        } else {
+            container["scripts"] = kept + ours
         }
     }
 
@@ -1037,6 +1078,18 @@ final class OpenCollectionDocument {
         return nil
     }
 
+    /// Collection, then folder (outermost first) scripts of one type.
+    func inheritedScripts(at path: NodePath?, type: String) -> [OCScript] {
+        var scripts = defaults(at: nil).scripts
+        if let path {
+            for depth in 1..<max(path.count, 1) {
+                let folder = Array(path.prefix(depth))
+                if isFolder(folder) { scripts += defaults(at: folder).scripts }
+            }
+        }
+        return scripts.filter { $0.type == type }
+    }
+
     /// Merge folder/collection default headers (outermost first) under the
     /// request's own headers, which win on name conflicts.
     func resolvedHeaders(at path: NodePath, requestHeaders: [OCHeader]) -> [OCHeader] {
@@ -1063,11 +1116,13 @@ final class OpenCollectionDocument {
     }
 
     /// Fold inheritance into a snapshot before sending.
-    func applyInheritance(to snapshot: inout OCRequestSnapshot, at path: NodePath) {
+    func applyInheritance(to snapshot: inout OCRequestSnapshot, at path: NodePath, headers: Bool = true) {
         if case .inherit = snapshot.authKind {
             snapshot.authKind = resolvedAuth(at: path) ?? .none
         }
-        snapshot.headers = resolvedHeaders(at: path, requestHeaders: snapshot.headers)
+        if headers {
+            snapshot.headers = resolvedHeaders(at: path, requestHeaders: snapshot.headers)
+        }
     }
 
     func effectiveRequest(at path: NodePath, from snapshot: OCRequestSnapshot, variables: [String: String]) -> AppState.EffectiveRequest {

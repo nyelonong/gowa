@@ -13,6 +13,7 @@ struct DefaultsSheet: View {
         case headers = "Headers"
         case auth = "Auth"
         case variables = "Variables"
+        case scripts = "Scripts"
         case docs = "Docs"
         case network = "Network"
         var id: String { rawValue }
@@ -84,6 +85,10 @@ struct DefaultsSheet: View {
                         note("Markdown. Saved in the collection file.")
                     case .network:
                         NetworkSettingsView(app: app)
+                    case .scripts:
+                        note("Runs for every request inside, before the request's own scripts.")
+                        ScriptsEditor(scripts: defaults.scripts) { scripts in change { $0.scripts = scripts } }
+                            .frame(minHeight: 320)
                     }
                 }
                 .padding(16)
@@ -97,6 +102,7 @@ struct DefaultsSheet: View {
         switch tab {
         case .headers: defaults.headers.filter { !$0.disabled }.count
         case .variables: defaults.variables.filter { !$0.disabled }.count
+        case .scripts: defaults.scripts.filter { !$0.code.isEmpty }.count
         case .auth, .docs, .network: 0
         }
     }

@@ -16,14 +16,21 @@ struct ResponseArea: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = app.errorText {
-                ContentUnavailableView {
-                    Label("Request failed", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
+                VStack(spacing: 0) {
+                    ContentUnavailableView {
+                        Label("Request failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    }
+                    if !app.lastLogs.isEmpty {
+                        Divider()
+                        ConsoleView(logs: app.lastLogs)
+                            .frame(maxHeight: 180)
+                    }
                 }
             } else if let result = app.result, let display = app.bodyDisplay {
                 VStack(spacing: 0) {
-                    if !app.lastAssertions.isEmpty {
+                    if !app.lastAssertions.isEmpty || !app.lastTests.isEmpty || app.lastScriptError != nil {
                         checksStrip
                         Divider()
                     }
@@ -62,7 +69,7 @@ struct ResponseArea: View {
 extension ResponseArea {
     @ViewBuilder
     private var checksStrip: some View {
-        let failed = app.lastAssertions.contains { !$0.pass }
+        let failed = app.lastAssertions.contains { !$0.pass } || app.lastTests.contains { !$0.passed } || app.lastScriptError != nil
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 Image(systemName: failed ? "xmark.seal" : "checkmark.seal")
@@ -96,6 +103,34 @@ extension ResponseArea {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(outcome.pass ? Color.green.opacity(0.10) : Color.red.opacity(0.12), in: Capsule())
+                }
+                ForEach(app.lastTests.indices, id: \.self) { index in
+                    let test = app.lastTests[index]
+                    HStack(spacing: 4) {
+                        Image(systemName: test.passed ? "checkmark" : "xmark")
+                            .foregroundStyle(test.passed ? .green : .red)
+                            .font(.caption2)
+                        Text(test.name)
+                            .font(.caption)
+                        if let error = test.error {
+                            Text(error)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.red)
+                                .lineLimit(1)
+                                .frame(maxWidth: 260, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(test.passed ? Color.green.opacity(0.10) : Color.red.opacity(0.12), in: Capsule())
+                    .help(test.error ?? test.name)
+                }
+                if let scriptError = app.lastScriptError {
+                    Label(scriptError, systemImage: "exclamationmark.octagon")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .help(scriptError)
                 }
             }
             .padding(.horizontal, 16)
@@ -155,6 +190,7 @@ struct ResponseView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
         case headers = "Headers"
+        case console = "Console"
         var id: String { rawValue }
     }
 
@@ -169,7 +205,13 @@ struct ResponseView: View {
                     tabs: Tab.allCases,
                     selection: $tab,
                     title: { $0.rawValue },
-                    badge: { $0 == .headers ? result.headers.count : 0 }
+                    badge: { tab in
+                        switch tab {
+                        case .headers: result.headers.count
+                        case .console: app.lastLogs.count
+                        case .body: 0
+                        }
+                    }
                 )
 
                 Spacer(minLength: 8)
@@ -277,6 +319,8 @@ struct ResponseView: View {
                 }
             case .headers:
                 headersList
+            case .console:
+                ConsoleView(logs: app.lastLogs)
             }
         }
     }
@@ -428,5 +472,46 @@ struct TimingBreakdown: View {
         }
         .padding(14)
         .frame(minWidth: 300)
+    }
+}
+
+struct ConsoleView: View {
+    let logs: [ScriptLog]
+
+    var body: some View {
+        if logs.isEmpty {
+            ContentUnavailableView("No console output", systemImage: "terminal", description: Text("console.log from scripts appears here."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(logs.indices, id: \.self) { index in
+                        let log = logs[index]
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(log.level)
+                                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                                .foregroundStyle(color(log.level))
+                                .frame(width: 40, alignment: .leading)
+                            Text(log.message)
+                                .font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
+                        Divider().opacity(0.4)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func color(_ level: String) -> Color {
+        switch level {
+        case "error": .red
+        case "warn": .orange
+        default: .secondary
+        }
     }
 }
