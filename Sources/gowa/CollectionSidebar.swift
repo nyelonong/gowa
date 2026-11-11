@@ -194,6 +194,7 @@ struct CollectionSidebar: View {
             Menu {
                 Button("New Request") { app.addRequest(under: nil) }
                 Button("New WebSocket") { app.addWebSocket(under: nil) }
+                Button("New gRPC Request") { app.addGrpc(under: nil) }
                 Button("New Folder") { app.addFolder(under: nil) }
                 Divider()
                 Button("Paste cURL…") { app.showingCurlImport = true }
@@ -367,6 +368,7 @@ struct SidebarRow: View {
             Divider()
             Button("New Request") { app.addRequest(under: node.node.path) }
             Button("New WebSocket") { app.addWebSocket(under: node.node.path) }
+            Button("New gRPC Request") { app.addGrpc(under: node.node.path) }
             Button("New Folder") { app.addFolder(under: node.node.path) }
             Divider()
             Button("Rename…") { app.beginRename(node.node.path) }

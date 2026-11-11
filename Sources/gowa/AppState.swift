@@ -361,6 +361,8 @@ final class AppState {
             Task { @MainActor in self?.cookieRevision += 1 }
         }
         cookieJar = jar
+        grpc.reset()
+        grpcDraft = nil
         socket.disconnect(reason: nil)
         socket.clear()
         socketDraft = nil
@@ -420,7 +422,13 @@ final class AppState {
             socket.clear()
         }
         socketDraft = nil
-        if let snapshot = doc.webSocketSnapshot(at: path) {
+        if selectedRequestPath != path { grpc.reset() }
+        grpcDraft = nil
+        if let snapshot = doc.grpcSnapshot(at: path) {
+            selectedRequestPath = path
+            draft = nil
+            grpcDraft = snapshot
+        } else if let snapshot = doc.webSocketSnapshot(at: path) {
             selectedRequestPath = path
             draft = nil
             socketDraft = snapshot
@@ -441,6 +449,118 @@ final class AppState {
             selectedRequestPath = nil
             draft = nil
         }
+    }
+
+    // MARK: - gRPC
+
+    var grpcDraft: OCGrpcSnapshot?
+    let grpc = GrpcSession()
+
+    func addGrpc(under parent: NodePath?) {
+        guard let doc = document else { return }
+        let name = uniqueName("New gRPC", among: siblingNames(under: parent))
+        let path = doc.addGrpc(under: parent, OCGrpcSnapshot(name: name, url: "localhost:50051"))
+        markDirtyAndRebuild()
+        select(path: path)
+    }
+
+    func updateGrpcDraft(_ snapshot: OCGrpcSnapshot) {
+        guard let doc = document, let path = selectedRequestPath else { return }
+        grpcDraft = snapshot
+        doc.updateGrpc(at: path, snapshot)
+        hasUnsavedChanges = true
+        rebuildSidebar()
+    }
+
+    /// Address, metadata, security, and variables for the selected gRPC request.
+    private func grpcContext() async throws -> (target: GrpcTarget, metadata: [(name: String, value: String)], security: GrpcClient.Security, message: String, variables: [String: String]) {
+        guard let snapshot = grpcDraft else { throw GrpcError.noMethod("") }
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
+        let prepared = try executor.prepare(snapshot.asRequest, at: selectedRequestPath, session: sessionVariables)
+        var effective = prepared.effective
+        if case .oauth2(let config) = prepared.snapshot.authKind {
+            try await executor.applyOAuth2(config.interpolated(prepared.variables), to: &effective)
+        }
+        let settings = document?.networkSettings ?? OCNetworkSettings()
+        var security = GrpcClient.Security(verifyTLS: settings.verifyTLS)
+        let target = try GrpcTarget.parse(OpenCollectionDocument.interpolate(snapshot.url, prepared.variables))
+        if let certificate = settings.clientCertificates.first(where: { !$0.disabled && !$0.path.isEmpty && NetworkOptions.domain($0.domain, matches: target.host, port: target.port) }) {
+            security.clientCertificate = try GrpcCertificates.load(certificate, variables: prepared.variables, base: document?.url?.deletingLastPathComponent())
+        }
+        return (target, effective.headers, security, OpenCollectionDocument.interpolate(snapshot.message, prepared.variables), prepared.variables)
+    }
+
+    func loadGrpcSchema() {
+        grpc.task?.cancel()
+        grpc.error = nil
+        grpc.task = Task { @MainActor in
+            do {
+                try await fetchGrpcSchema()
+            } catch is CancellationError {
+            } catch {
+                grpc.error = error.localizedDescription
+            }
+        }
+    }
+
+    /// Loads methods from the descriptor file, or by server reflection, and
+    /// picks the first method when none is chosen yet.
+    private func fetchGrpcSchema() async throws {
+        guard let snapshot = grpcDraft else { return }
+        grpc.loadingSchema = true
+        defer { grpc.loadingSchema = false }
+        let context = try await grpcContext()
+        if !snapshot.protoFilePath.isEmpty {
+            let base = document?.url?.deletingLastPathComponent()
+            let file = EffectiveBody.resolvePath(OpenCollectionDocument.interpolate(snapshot.protoFilePath, context.variables), base: base)
+            grpc.schema = try await Task.detached { try GrpcClient.loadDescriptors(at: file, importPaths: []) }.value
+            grpc.schemaSource = file.lastPathComponent
+        } else {
+            grpc.schema = try await GrpcClient.reflect(target: context.target, security: context.security, metadata: context.metadata)
+            grpc.schemaSource = "server reflection"
+        }
+        try Task.checkCancellation()
+        if let schema = grpc.schema, var current = grpcDraft,
+           current.method.isEmpty || schema.method(current.method) == nil, let first = schema.methods.first {
+            current.method = first.fullName
+            current.methodType = first.kind
+            if current.message.trimmingCharacters(in: .whitespacesAndNewlines) == "{}" {
+                current.message = JSONPath.render([ProtoCodec(schema: schema).template(for: first.input)])
+            }
+            updateGrpcDraft(current)
+        }
+    }
+
+    func invokeGrpc() {
+        grpc.calling = true
+        grpc.error = nil
+        grpc.result = nil
+        grpc.liveResponses = []
+        grpc.task?.cancel()
+        grpc.task = Task { @MainActor in
+            defer { grpc.calling = false }
+            do {
+                if grpc.schema == nil { try await fetchGrpcSchema() }
+                guard let snapshot = grpcDraft, let schema = grpc.schema else { throw GrpcError.reflection("no schema") }
+                guard let method = schema.method(snapshot.method) else { throw GrpcError.noMethod(snapshot.method) }
+                let context = try await grpcContext()
+                let encoded = try GrpcClient.encode(context.message, method: method, schema: schema)
+                grpc.result = try await GrpcClient.invoke(
+                    target: context.target, security: context.security, method: method, schema: schema,
+                    encoded: encoded, metadata: context.metadata, timeout: .seconds(60)
+                ) { text in
+                    Task { @MainActor [weak self] in self?.grpc.liveResponses.append(text) }
+                }
+            } catch is CancellationError {
+                grpc.error = "Call cancelled"
+            } catch {
+                grpc.error = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelGrpc() {
+        grpc.task?.cancel()
     }
 
     // MARK: - WebSocket
@@ -602,6 +722,8 @@ final class AppState {
             selectedRequestPath = nil
             draft = nil
             socketDraft = nil
+            grpcDraft = nil
+            grpc.reset()
             socket.disconnect(reason: nil)
         } else if let selected = selectedRequestPath {
             selectedRequestPath = OpenCollectionDocument.adjust(selected, removing: path)

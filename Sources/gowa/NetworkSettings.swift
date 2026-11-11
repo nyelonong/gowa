@@ -191,18 +191,20 @@ struct NetworkOptions: @unchecked Sendable {
         return URLCredential(identity: identity, certificates: Array(chain.dropFirst()), persistence: .forSession)
     }
 
-    /// `domain` accepts `host`, `host:port`, and a leading `*.` wildcard.
     func identity(forHost host: String, port: Int) -> URLCredential? {
-        identities.first { entry in
-            let pattern = entry.domain.lowercased()
-            let parts = pattern.split(separator: ":", maxSplits: 1).map(String.init)
-            let hostPattern = parts.first ?? ""
-            if parts.count > 1, Int(parts[1]) != port { return false }
-            if hostPattern.hasPrefix("*.") {
-                return host.lowercased().hasSuffix(String(hostPattern.dropFirst(1)))
-            }
-            return host.lowercased() == hostPattern
-        }?.credential
+        identities.first { Self.domain($0.domain, matches: host, port: port) }?.credential
+    }
+
+    /// `domain` accepts `host`, `host:port`, and a leading `*.` wildcard.
+    static func domain(_ domain: String, matches host: String, port: Int) -> Bool {
+        let pattern = domain.lowercased()
+        let parts = pattern.split(separator: ":", maxSplits: 1).map(String.init)
+        let hostPattern = parts.first ?? ""
+        if parts.count > 1, Int(parts[1]) != port { return false }
+        if hostPattern.hasPrefix("*.") {
+            return host.lowercased().hasSuffix(String(hostPattern.dropFirst(1)))
+        }
+        return host.lowercased() == hostPattern
     }
 }
 

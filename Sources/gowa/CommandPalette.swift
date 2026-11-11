@@ -169,6 +169,7 @@ struct CommandPalette: View {
         let actions: [(String, String, @MainActor () -> Void)] = [
             ("New Request", "", { app.addRequest(under: nil) }),
             ("New WebSocket", "", { app.addWebSocket(under: nil) }),
+            ("New gRPC Request", "", { app.addGrpc(under: nil) }),
             ("New Folder", "", { app.addFolder(under: nil) }),
             ("Paste cURL…", "Import a request", { app.showingCurlImport = true }),
             ("Send Request", "⌘↩", { app.send() }),
