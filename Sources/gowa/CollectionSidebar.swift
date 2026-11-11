@@ -389,6 +389,10 @@ struct SidebarRow: View {
         }
         .contextMenu {
             Button("Copy as cURL") { app.copyAsCurl(at: node.node.path) }
+            Button("Generate Code…") {
+                app.select(path: node.node.path)
+                app.showingCode = true
+            }
             Divider()
             Button("Rename…") { app.beginRename(node.node.path) }
             Button("Duplicate") { app.duplicate(node.node.path) }

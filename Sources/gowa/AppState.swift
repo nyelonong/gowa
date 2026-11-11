@@ -126,6 +126,24 @@ final class AppState {
     var cookieRevision = 0
     var showingCookies = false
     var showingPalette = false
+    var showingCode = false
+
+    /// The selected request with variables and inheritance resolved, for code generation.
+    func effectiveRequestForCode() -> Result<(effective: EffectiveRequest, note: String), Error>? {
+        guard let snapshot = draft else { return nil }
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
+        do {
+            let prepared = try executor.prepare(snapshot, at: selectedRequestPath, session: sessionVariables)
+            var notes = ["Values are resolved with the active environment, so the code can contain secrets."]
+            if case .oauth2 = prepared.snapshot.authKind { notes.append("OAuth 2.0 tokens aren't included; add an Authorization header.") }
+            if !executor.scripts(prepared.snapshot, at: selectedRequestPath, types: ["before-request"]).isEmpty {
+                notes.append("Pre-request scripts don't run here.")
+            }
+            return .success((prepared.effective, notes.joined(separator: " ")))
+        } catch {
+            return .failure(error)
+        }
+    }
     var showingHistory = false
     var gitStatus: GitStatus?
 

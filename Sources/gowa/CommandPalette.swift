@@ -171,6 +171,7 @@ struct CommandPalette: View {
             ("New Folder", "", { app.addFolder(under: nil) }),
             ("Paste cURL…", "Import a request", { app.showingCurlImport = true }),
             ("Send Request", "⌘↩", { app.send() }),
+            ("Generate Code…", "cURL, HTTPie, JavaScript, Python, Go, Swift", { app.showingCode = true }),
             ("Save Collection", "⌘S", { app.saveCollection() }),
             ("Run All Requests", "Folder runner", { app.startRunner(under: nil) }),
             ("Manage Environments…", "", { app.showingEnvironmentManager = true }),

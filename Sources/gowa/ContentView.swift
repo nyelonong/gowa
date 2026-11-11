@@ -74,6 +74,12 @@ struct ContentView: View {
             CurlImportSheet(app: app)
         }
         .sheet(isPresented: Binding(
+            get: { app.showingCode },
+            set: { app.showingCode = $0 }
+        )) {
+            CodeSheet(app: app)
+        }
+        .sheet(isPresented: Binding(
             get: { app.showingHistory },
             set: { app.showingHistory = $0 }
         )) {

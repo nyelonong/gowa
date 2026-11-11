@@ -341,8 +341,8 @@ struct ResponseView: View {
                     app.saveResponse()
                 }
 
-                IconButton(title: "Copy request as cURL", systemImage: "terminal", help: "Copy request as cURL") {
-                    app.copyAsCurl()
+                IconButton(title: "Generate code", systemImage: "chevron.left.forwardslash.chevron.right", help: "Generate code: cURL, HTTPie, JavaScript, Python, Go, Swift") {
+                    app.showingCode = true
                 }
             }
             .padding(.horizontal, 10)

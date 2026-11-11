@@ -14,6 +14,17 @@ enum CurlBuilder {
         for (name, value) in request.headers {
             parts.append("-H \(shellQuote("\(name): \(value)"))")
         }
+        // curl's own default for --data is form-encoded; state what Gowa sends.
+        if request.header("Content-Type") == nil {
+            switch request.payload {
+            case .text(_, let type):
+                parts.append("-H \(shellQuote("Content-Type: \(type)"))")
+            case .file(let url, let type):
+                parts.append("-H \(shellQuote("Content-Type: \(type.isEmpty ? EffectiveBody.mimeType(for: url) : type)"))")
+            case .none, .form, .multipart:
+                break
+            }
+        }
 
         switch request.payload {
         case .none:
