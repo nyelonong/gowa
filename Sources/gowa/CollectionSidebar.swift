@@ -2,6 +2,8 @@ import SwiftUI
 
 struct CollectionSidebar: View {
     let app: AppState
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
 
     static let widthDefaultsKey = "gowa.sidebar.width"
 
@@ -44,36 +46,24 @@ struct CollectionSidebar: View {
     // MARK: - No collection open
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 40))
+                .font(.system(size: 34))
                 .foregroundStyle(.tertiary)
-            Text("Welcome to Gowa")
-                .font(.title3.weight(.semibold))
-            Text("Organize HTTP requests in collections.\nEach collection is a YAML file you keep in git.")
+            Text("No collection open")
+                .font(.headline)
+            Text("Open a collection to begin.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            VStack(spacing: 8) {
-                Button {
-                    app.newCollection()
-                } label: {
-                    Label("Create a new collection", systemImage: "plus.circle.fill")
-                        .frame(maxWidth: 200)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("n")
-
-                Button {
-                    app.openCollectionPanel()
-                } label: {
-                    Label("Open a collection…", systemImage: "folder")
-                        .frame(maxWidth: 200)
-                }
-                .buttonStyle(.bordered)
-                .keyboardShortcut("o")
+            Button {
+                app.openCollectionPanel()
+            } label: {
+                Label("Open Collection…", systemImage: "folder")
             }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("o")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
@@ -84,109 +74,147 @@ struct CollectionSidebar: View {
     private var collectionContent: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if app.sidebarTree.isEmpty {
+                Divider()
                 emptyCollectionHint
             } else {
-                treeList
+                searchField
+                Divider()
+                if visibleTree.isEmpty {
+                    noMatches
+                } else {
+                    treeList
+                }
             }
         }
     }
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var visibleTree: [SidebarNode] {
+        SidebarNode.filter(app.sidebarTree, query: searchText)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search requests", text: $searchText)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+                .onSubmit {
+                    if isSearching, let first = SidebarNode.firstRequest(in: visibleTree) {
+                        app.select(path: first.node.path)
+                    }
+                }
+                .onExitCommand {
+                    searchText = ""
+                    searchFocused = false
+                }
+                .accessibilityLabel("Search requests")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 10)
+        .background(
+            Button("Search Requests") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .hidden()
+        )
+    }
+
+    private var noMatches: some View {
+        VStack(spacing: 6) {
+            Text("No matches")
+                .font(.callout.weight(.medium))
+            Text("No request name, URL, or method contains “\(searchText.trimmingCharacters(in: .whitespaces))”.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
                     Text(app.document?.name ?? "Collection")
                         .font(.headline)
                         .lineLimit(1)
-                    if let url = app.document?.url {
-                        Text(url.lastPathComponent)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                    if app.hasUnsavedChanges {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 7, height: 7)
+                            .help("Unsaved changes — ⌘S to save")
+                            .accessibilityLabel("Unsaved changes")
                     }
                 }
-                Spacer()
-                Button {
-                    app.beginRenameCollection()
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Rename collection (writes info.name on save)")
-                if app.hasUnsavedChanges {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 7, height: 7)
-                        .help("Unsaved changes — ⌘S to save")
+                if let url = app.document?.url {
+                    Text(url.lastPathComponent)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
-            HStack(spacing: 8) {
-                Menu {
-                    Button("New Request") { app.addRequest(under: nil) }
-                    Button("New Folder") { app.addFolder(under: nil) }
-                    Divider()
-                    Button("Paste cURL…") { app.showingCurlImport = true }
-                } label: {
-                    Label("New", systemImage: "plus")
-                }
-                .fixedSize()
+            Spacer(minLength: 0)
 
-                Button("Open…") { app.openCollectionPanel() }
+            Menu {
+                Button("New Request") { app.addRequest(under: nil) }
+                Button("New Folder") { app.addFolder(under: nil) }
+                Divider()
+                Button("Paste cURL…") { app.showingCurlImport = true }
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("New request, folder, or cURL import")
+            .accessibilityLabel("New")
 
-                Button {
-                    app.saveCollection()
-                } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
-                }
-                .disabled(!app.hasUnsavedChanges && app.document?.url != nil)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    app.startRunner(under: nil)
-                } label: {
-                    Image(systemName: "play.circle")
-                }
-                .help("Run all requests (top to bottom)")
-
+            Menu {
+                Button("Rename Collection…") { app.beginRenameCollection() }
+                Button("Open Collection…") { app.openCollectionPanel() }
                 if app.document?.url != nil {
-                    Button {
-                        app.revealCollectionInFinder()
-                    } label: {
-                        Image(systemName: "arrow.up.forward.app")
-                    }
-                    .help("Reveal collection file in Finder")
+                    Button("Reveal in Finder") { app.revealCollectionInFinder() }
                 }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
-
-            if !app.environments.isEmpty {
-                HStack(spacing: 6) {
-                    Picker("Environment", selection: Binding(
-                        get: { app.activeEnvironment ?? "" },
-                        set: { app.activeEnvironment = $0.isEmpty ? nil : $0 }
-                    )) {
-                        Text("No environment").tag("")
-                        ForEach(app.environments) { env in
-                            Text(env.name).tag(env.name)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity)
-
-                    Button {
-                        app.showingEnvironmentManager = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .help("Manage environments and variables")
-                }
-            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Collection actions")
+            .accessibilityLabel("Collection actions")
         }
-        .padding(10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var emptyCollectionHint: some View {
@@ -216,8 +244,8 @@ struct CollectionSidebar: View {
 
     private var treeList: some View {
         List {
-            ForEach(app.sidebarTree) { node in
-                SidebarRow(app: app, node: node)
+            ForEach(visibleTree) { node in
+                SidebarRow(app: app, node: node, forceExpanded: isSearching)
             }
         }
         .listStyle(.sidebar)
@@ -246,13 +274,14 @@ struct CollectionSidebar: View {
 struct SidebarRow: View {
     let app: AppState
     let node: SidebarNode
+    var forceExpanded = false
     @State private var isExpanded = true
 
     var body: some View {
         if node.isFolder {
-            DisclosureGroup(isExpanded: $isExpanded) {
+            DisclosureGroup(isExpanded: forceExpanded ? .constant(true) : $isExpanded) {
                 ForEach(node.children) { child in
-                    SidebarRow(app: app, node: child)
+                    SidebarRow(app: app, node: child, forceExpanded: forceExpanded)
                 }
             } label: {
                 folderLabel
@@ -260,16 +289,22 @@ struct SidebarRow: View {
         } else {
             requestLabel
                 .tag(node.id)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     app.select(path: node.node.path)
                 }
-                .background(
-                    app.selectedRequestPath == node.node.path
-                        ? Color.accentColor.opacity(0.18)
-                        : Color.clear
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.accentColor.opacity(isSelected ? 0.2 : 0))
+                        .padding(.horizontal, 8)
                 )
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
+    }
+
+    private var isSelected: Bool {
+        app.selectedRequestPath == node.node.path
     }
 
     private var folderLabel: some View {
@@ -277,6 +312,7 @@ struct SidebarRow: View {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
             Text(node.name)
+                .font(.callout.weight(.medium))
                 .lineLimit(1)
         }
         .contextMenu {
@@ -294,12 +330,14 @@ struct SidebarRow: View {
 
     private var requestLabel: some View {
         HStack(spacing: 6) {
-            Text(node.node.method ?? "HTTP")
-                .font(.caption2.weight(.semibold).monospaced())
-                .foregroundStyle(methodColor)
-                .frame(width: 46, alignment: .leading)
+            Text(Theme.shortMethod(node.node.method))
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(Theme.methodColor(node.node.method))
+                .frame(width: 36, alignment: .trailing)
+                .accessibilityLabel(node.node.method ?? "HTTP")
             Text(node.name)
                 .font(.callout)
+                .fontWeight(isSelected ? .medium : .regular)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -310,16 +348,6 @@ struct SidebarRow: View {
             Button("Duplicate") { app.duplicate(node.node.path) }
             Divider()
             Button("Delete", role: .destructive) { app.delete(node.node.path) }
-        }
-    }
-
-    private var methodColor: Color {
-        switch node.node.method {
-        case "GET": .green
-        case "POST": .blue
-        case "PUT", "PATCH": .orange
-        case "DELETE": .red
-        default: .secondary
         }
     }
 }

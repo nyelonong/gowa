@@ -7,8 +7,14 @@ struct ResponseArea: View {
     var body: some View {
         Group {
             if app.busy {
-                ProgressView("Sending…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Sending…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = app.errorText {
                 ContentUnavailableView {
                     Label("Request failed", systemImage: "exclamationmark.triangle")
@@ -28,11 +34,25 @@ struct ResponseArea: View {
                     ResponseView(app: app, result: result, display: display)
                 }
             } else {
-                ContentUnavailableView(
-                    "Gowa",
-                    systemImage: "paperplane",
-                    description: Text("Select a request and press ⌘↩")
-                )
+                VStack(spacing: 8) {
+                    Image(systemName: "paperplane")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.tertiary)
+                    Text("No response yet")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Press")
+                        Text("⌘↩")
+                            .font(.caption.weight(.medium).monospaced())
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                        Text("to send")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,83 +62,83 @@ struct ResponseArea: View {
 extension ResponseArea {
     @ViewBuilder
     private var checksStrip: some View {
-        @Bindable var app = app
         let failed = app.lastAssertions.contains { !$0.pass }
-        HStack(spacing: 10) {
-            Image(systemName: failed ? "xmark.seal" : "checkmark.seal")
-                .foregroundStyle(failed ? .red : .green)
-            Text(failed ? "Checks failed" : "Checks passed")
-                .font(.caption.weight(.medium))
-            ForEach(app.lastAssertions, id: \.expression) { outcome in
-                HStack(spacing: 4) {
-                    Image(systemName: outcome.pass ? "checkmark" : "xmark")
-                        .foregroundStyle(outcome.pass ? .green : .red)
-                        .font(.caption2)
-                    Text(outcome.expression)
-                        .font(.system(.caption, design: .monospaced))
-                    Text(outcome.op)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if let expected = outcome.expected {
-                        Text("= \(expected)")
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                Image(systemName: failed ? "xmark.seal" : "checkmark.seal")
+                    .foregroundStyle(failed ? .red : .green)
+                Text(failed ? "Checks failed" : "Checks passed")
+                    .font(.caption.weight(.medium))
+                ForEach(app.lastAssertions, id: \.expression) { outcome in
+                    HStack(spacing: 4) {
+                        Image(systemName: outcome.pass ? "checkmark" : "xmark")
+                            .foregroundStyle(outcome.pass ? .green : .red)
+                            .font(.caption2)
+                        Text(outcome.expression)
                             .font(.system(.caption, design: .monospaced))
+                        Text(outcome.op)
+                            .font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(.secondary)
+                        if let expected = outcome.expected {
+                            Text("= \(expected)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let actual = outcome.actual {
+                            let actualColor: Color = outcome.pass ? .secondary : .red
+                            Text("got \(actual)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(actualColor)
+                                .lineLimit(1)
+                                .frame(maxWidth: 200, alignment: .leading)
+                        }
                     }
-                    if let actual = outcome.actual {
-                        let actualColor: Color = outcome.pass ? .secondary : .red
-                        Text("got \(actual)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(actualColor)
-                            .lineLimit(1)
-                            .frame(maxWidth: 200, alignment: .leading)
-                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(outcome.pass ? Color.green.opacity(0.10) : Color.red.opacity(0.12), in: Capsule())
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(outcome.pass ? Color.green.opacity(0.10) : Color.red.opacity(0.12), in: Capsule())
             }
-            Spacer()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
         .background(failed ? Color.red.opacity(0.05) : Color.green.opacity(0.05))
     }
 
     @ViewBuilder
     private var capturedStrip: some View {
-        @Bindable var app = app
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.doc")
-                .foregroundStyle(.green)
-            Text("Captured")
-                .font(.caption.weight(.medium))
-            ForEach(app.lastCaptures, id: \.name) { capture in
-                HStack(spacing: 4) {
-                    Text("{{\(capture.name)}}")
-                        .font(.system(.caption, design: .monospaced).weight(.medium))
-                    Text("= \(capture.value)")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(capture.value == "<not found>" ? .red : .secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 260, alignment: .leading)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.doc")
+                    .foregroundStyle(.green)
+                Text("Captured")
+                    .font(.caption.weight(.medium))
+                ForEach(app.lastCaptures, id: \.name) { capture in
+                    HStack(spacing: 4) {
+                        Text("{{\(capture.name)}}")
+                            .font(.system(.caption, design: .monospaced).weight(.medium))
+                        Text("= \(capture.value)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(capture.value == "<not found>" ? .red : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 260, alignment: .leading)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(capture.stored ? Color.orange.opacity(0.12) : Color.green.opacity(0.12), in: Capsule())
+                    .help(capture.stored ? "Stored into the active environment (persisted on save)" : "Stored in session memory — not saved to the collection file")
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(capture.stored ? Color.orange.opacity(0.12) : Color.green.opacity(0.12), in: Capsule())
-                .help(capture.stored ? "Stored into the active environment (persisted on save)" : "Stored in session memory — not saved to the collection file")
+                Button("Clear") {
+                    app.sessionVariables = [:]
+                    app.lastCaptures = []
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            Spacer()
-            Button("Clear") {
-                app.sessionVariables = [:]
-                app.lastCaptures = []
-            }
-            .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
         .background(Color.green.opacity(0.05))
     }
 }
@@ -143,86 +163,82 @@ struct ResponseView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker("Response", selection: $tab) {
-                    ForEach(Tab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
+            HStack(spacing: 10) {
+                TabStrip(
+                    tabs: Tab.allCases,
+                    selection: $tab,
+                    title: { $0.rawValue },
+                    badge: { $0 == .headers ? result.headers.count : 0 }
+                )
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text("\(result.status) \(result.statusPhrase)")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .lineLimit(1)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 180)
-
-                Text("\(result.status) \(result.statusPhrase)")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(statusColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(statusColor.opacity(0.15), in: Capsule())
-
-                Text(ByteCountFormatter.string(fromByteCount: Int64(result.body.count), countStyle: .binary))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(statusColor.opacity(0.13), in: Capsule())
 
                 Text(formatDuration(result.elapsed))
-                    .font(.callout)
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
 
-                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: Int64(result.body.count), countStyle: .binary))
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Divider()
+                    .frame(height: 16)
 
                 if display.isJSON {
-                    Toggle("Format", isOn: $prettyPrinted)
-                        .toggleStyle(.checkbox)
-                        .font(.callout)
-                        .controlSize(.small)
+                    Toggle(isOn: $prettyPrinted) {
+                        Image(systemName: "text.alignleft")
+                            .frame(width: 22, height: 22)
+                    }
+                    .toggleStyle(.button)
+                    .buttonStyle(.borderless)
+                    .help(prettyPrinted ? "Show raw body" : "Format JSON")
+                    .accessibilityLabel("Format JSON")
                 }
 
                 if app.diffContext != nil {
-                    Button {
-                        showDiff.toggle()
-                    } label: {
-                        Image(systemName: showDiff ? "text.bubble" : "plus.slash.minus")
+                    Toggle(isOn: $showDiff) {
+                        Image(systemName: "plus.forwardslash.minus")
+                            .frame(width: 22, height: 22)
                     }
-                    .buttonStyle(.plain)
+                    .toggleStyle(.button)
+                    .buttonStyle(.borderless)
                     .help(showDiff ? "Back to response" : "Diff with previous response")
+                    .accessibilityLabel("Diff with previous response")
                 }
 
-                Button {
+                IconButton(title: "Find in response", systemImage: "magnifyingglass", help: "Find in response (⌘F)") {
                     app.beginFindInResponse()
-                } label: {
-                    Image(systemName: "magnifyingglass")
                 }
-                .buttonStyle(.plain)
-                .help("Find in response (⌘F)")
 
-                Button {
-                    app.copyAsCurl()
-                } label: {
-                    Image(systemName: "curlybraces.square")
-                }
-                .buttonStyle(.plain)
-                .help("Copy request as cURL")
-
-                Button {
-                    app.saveResponse()
-                } label: {
-                    Image(systemName: "square.and.arrow.down")
-                }
-                .buttonStyle(.plain)
-                .help("Save response body to file")
-
-                Button {
+                IconButton(title: "Copy response body", systemImage: "doc.on.doc", help: "Copy body") {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.setString(shownText, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
                 }
-                .buttonStyle(.plain)
-                .help("Copy body")
+
+                IconButton(title: "Save response body", systemImage: "square.and.arrow.down", help: "Save response body to file") {
+                    app.saveResponse()
+                }
+
+                IconButton(title: "Copy request as cURL", systemImage: "terminal", help: "Copy request as cURL") {
+                    app.copyAsCurl()
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
 
             Divider()
 
@@ -245,7 +261,8 @@ struct ResponseView: View {
                 } else {
                     CodeViewer(
                         text: shownText,
-                        runs: display.runs(prettyPrinted: prettyPrinted)
+                        runs: display.runs(prettyPrinted: prettyPrinted),
+                        findTrigger: app.findTrigger
                     )
                 }
             case .headers:
@@ -287,7 +304,7 @@ struct ResponseView: View {
     }
 
     private func formatDuration(_ d: Duration) -> String {
-        let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e18
+        let ms = Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
         return String(format: "%.0f ms", ms)
     }
 }

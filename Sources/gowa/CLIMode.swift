@@ -32,14 +32,12 @@ enum CLIMode {
             case "--env":
                 guard index + 1 < args.count else {
                     fail("--env requires a value")
-                    return
                 }
                 environment = args[index + 1]
                 index += 1
             case "--filter":
                 guard index + 1 < args.count else {
                     fail("--filter requires a value")
-                    return
                 }
                 filter = args[index + 1]
                 index += 1
@@ -50,14 +48,12 @@ enum CLIMode {
                 if path == nil { path = token }
             case let token:
                 fail("unknown argument: \(token)")
-                return
             }
             index += 1
         }
 
         guard let path else {
             fail("missing collection file — usage: gowa run <collection.yml> [--env NAME]")
-            return
         }
 
         let code = await runCollection(at: path, environment: environment, filter: filter)
@@ -101,7 +97,7 @@ enum CLIMode {
             var variables = resolution.values
             for (name, value) in sessionVariables { variables[name] = value }
 
-            let effective = AppState.effectiveRequest(from: snapshot, variables: variables)
+            let effective = document.effectiveRequest(at: node.path, from: snapshot, variables: variables)
             let method = HTTPMethod(rawValue: effective.method) ?? .GET
 
             let clock = ContinuousClock()
@@ -110,7 +106,10 @@ enum CLIMode {
             var failureDetail: String?
 
             do {
-                let client = HTTPClient(followRedirects: effective.followRedirects)
+                let client = HTTPClient(
+                    followRedirects: effective.followRedirects,
+                    timeoutSeconds: effective.timeout ?? 30
+                )
                 let result = try await client.send(
                     method: method,
                     urlText: effective.url,

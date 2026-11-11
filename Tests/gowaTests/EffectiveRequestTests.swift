@@ -95,3 +95,63 @@ func bodyInterpolation() {
     let get = AppState.effectiveRequest(from: snapshot, variables: ["token": "t1"])
     #expect(get.body == "")
 }
+
+@MainActor
+@Test("path params fill :name segments and leave the port and unset params alone")
+func pathParams() {
+    let snapshot = OCRequestSnapshot(
+        name: "r",
+        method: "GET",
+        url: "{{baseUrl}}/accounts/:account/objects/:level/:id?expand=1",
+        params: [
+            OCParam(name: "account", value: "{{account}}", kind: "path", disabled: false),
+            OCParam(name: "level", value: "ad set", kind: "path", disabled: false),
+            OCParam(name: "id", value: "", kind: "path", disabled: false),
+            OCParam(name: "unused", value: "x", kind: "path", disabled: true),
+        ],
+        headers: [],
+        bodyType: nil,
+        bodyData: "",
+        authKind: .none,
+        settings: OCSettings(followRedirects: nil, timeout: nil),
+        docs: nil
+    )
+
+    let effective = AppState.effectiveRequest(
+        from: snapshot,
+        variables: ["baseUrl": "http://localhost:3000", "account": "act_1/2"]
+    )
+
+    #expect(effective.url == "http://localhost:3000/accounts/act_1%2F2/objects/ad%20set/:id?expand=1")
+}
+
+@MainActor
+@Test("document effective request folds in folder auth and headers")
+func documentEffectiveRequestInherits() throws {
+    let doc = OpenCollectionDocument.sample()
+    let folder = doc.addFolder(under: nil, name: "Dashboard")
+    var items = try #require(doc.root["items"] as? [[String: Any]])
+    items[folder[0]]["request"] = [
+        "auth": ["type": "bearer", "token": "{{token}}"],
+        "headers": [["name": "Access_token", "value": "{{token}}"]],
+    ]
+    doc.root["items"] = items
+    let path = doc.addRequest(under: folder, snapshot: OCRequestSnapshot(
+        name: "Stats",
+        method: "GET",
+        url: "https://api.test/stats",
+        params: [],
+        headers: [],
+        bodyType: nil,
+        bodyData: "",
+        authKind: .inherit,
+        settings: OCSettings(followRedirects: nil, timeout: nil),
+        docs: nil
+    ))
+    let snapshot = try #require(doc.requestSnapshot(at: path))
+
+    let effective = doc.effectiveRequest(at: path, from: snapshot, variables: ["token": "t"])
+
+    #expect(effective.headers.contains { $0.name == "Access_token" && $0.value == "t" })
+    #expect(effective.headers.contains { $0.name == "Authorization" && $0.value == "Bearer t" })
+}

@@ -95,7 +95,8 @@ struct HTTPClient: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
-        request.timeoutInterval = TimeInterval(timeoutSeconds)
+        let timeout = timeoutSeconds > 0 ? TimeInterval(timeoutSeconds) : TimeInterval.greatestFiniteMagnitude
+        request.timeoutInterval = timeout
         for (name, value) in headers where !name.isEmpty {
             request.setValue(value, forHTTPHeaderField: name)
         }
@@ -109,7 +110,7 @@ struct HTTPClient: Sendable {
             session = URLSession.shared
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = request.timeoutInterval
+            config.timeoutIntervalForRequest = timeout
             let delegate = NoRedirectDelegate()
             session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }

@@ -52,7 +52,9 @@ struct CodeViewer: NSViewRepresentable {
         if context.coordinator.lastFindTrigger != findTrigger {
             context.coordinator.lastFindTrigger = findTrigger
             NSApp.keyWindow?.makeFirstResponder(textView)
-            textView.performFindPanelAction(#selector(NSTextView.performFindPanelAction(_:)))
+            let showFindBar = NSMenuItem()
+            showFindBar.tag = NSTextFinder.Action.showFindInterface.rawValue
+            textView.performTextFinderAction(showFindBar)
         }
 
         guard textView.string != text else { return }

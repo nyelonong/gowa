@@ -13,21 +13,9 @@ struct RequestEditor: View {
                     .foregroundStyle(.tertiary)
                 Text("No request selected")
                     .font(.title3.weight(.medium))
-                Text("Pick one in the sidebar, or add a new one:")
+                Text("Choose a request from the sidebar, or use New to add one.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    Button {
-                        app.addRequest(under: nil)
-                    } label: {
-                        Label("New Request", systemImage: "plus.circle.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Menu("New Folder") {
-                        Button("At top level") { app.addFolder(under: nil) }
-                    }
-                    Button("Paste cURL…") { app.showingCurlImport = true }
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -58,6 +46,7 @@ private struct EditorContent: View {
         case captures = "Captures"
         case checks = "Checks"
         case settings = "Settings"
+
         var id: String { rawValue }
     }
 
@@ -70,97 +59,180 @@ private struct EditorContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Picker("Method", selection: Binding(
-                    get: { draft.method },
-                    set: { newValue in commit { snapshot in snapshot.method = newValue } }
-                )) {
-                    ForEach(HTTPMethod.allCases) { method in
-                        Text(method.rawValue).tag(method.rawValue)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-
+            VStack(alignment: .leading, spacing: 8) {
                 TextField(
-                    "https://example.com/path",
+                    "Request name",
                     text: Binding(
-                        get: { draft.url },
-                        set: { newValue in commit { snapshot in snapshot.url = newValue } }
+                        get: { draft.name },
+                        set: { newValue in commit { snapshot in snapshot.name = newValue } }
                     )
                 )
-                .font(.system(.body, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { app.send() }
+                .font(.title3.weight(.semibold))
+                .textFieldStyle(.plain)
+                .accessibilityLabel("Request name")
 
-                if !activeVariables.isEmpty {
-                    Menu {
-                        ForEach(activeVariables) { variable in
-                            Button("{{\(variable.name)}}") { insertVariableAtCursor(variable) }
-                        }
-                    } label: {
-                        Image(systemName: "curlybraces.square")
-                    }
-                    .help("Insert a variable at the cursor")
+                HStack(spacing: 8) {
+                    urlBar
+                    sendControl
                 }
 
-                if app.busy {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Button {
-                        app.send()
-                    } label: {
-                        Image(systemName: "paperplane.fill")
-                            .foregroundStyle(.white)
+                if let validationMessage = app.sendValidationMessage {
+                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                if !variableSuggestions.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Complete")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(variableSuggestions) { variable in
+                            Button("{{\(variable.name)}}") {
+                                completeVariable(variable)
+                            }
+                            .font(.system(.caption, design: .monospaced))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!app.canSend)
-                    .help("Send request (⌘↩)")
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
 
-            if !variableSuggestions.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "curlybraces")
-                        .foregroundStyle(.secondary)
-                    Text("Complete:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(variableSuggestions) { variable in
-                        Button("{{\(variable.name)}}") {
-                            completeVariable(variable)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-            }
-
-            Picker("Section", selection: $section) {
-                ForEach(Section.allCases) { section in
-                    Text(section.rawValue).tag(section)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 520)
+            TabStrip(
+                tabs: Section.allCases,
+                selection: $section,
+                title: { $0.rawValue },
+                badge: badgeCount
+            )
+            .padding(.horizontal, 10)
             .padding(.bottom, 8)
 
-            switch section {
-            case .params: ParamRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .headers: HeaderRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .auth: AuthSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .body: BodySection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .captures: CaptureRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .checks: CheckRows(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
-            case .settings: SettingsSection(app: app, draft: draft, commit: RequestCommitter { change in commit(change) })
+            Divider()
+
+            sectionContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var urlBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(HTTPMethod.allCases) { method in
+                    Button(method.rawValue) {
+                        commit { snapshot in snapshot.method = method.rawValue }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(draft.method)
+                        .font(.system(.callout, design: .monospaced).weight(.bold))
+                        .foregroundStyle(Theme.methodColor(draft.method))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("HTTP method")
+            .accessibilityValue(draft.method)
+
+            Divider()
+                .frame(height: 16)
+
+            TextField(
+                "https://example.com/path",
+                text: Binding(
+                    get: { draft.url },
+                    set: { newValue in commit { snapshot in snapshot.url = newValue } }
+                )
+            )
+            .font(.system(.body, design: .monospaced))
+            .textFieldStyle(.plain)
+            .onSubmit { app.send() }
+            .accessibilityLabel("Request URL")
+
+            if !activeVariables.isEmpty {
+                Menu {
+                    ForEach(activeVariables) { variable in
+                        Button("{{\(variable.name)}}") { insertVariableAtCursor(variable) }
+                    }
+                } label: {
+                    Image(systemName: "curlybraces")
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Insert a variable at the cursor")
+                .accessibilityLabel("Insert a variable")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(Theme.fieldFill, in: RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .strokeBorder(Theme.hairline)
+        )
+    }
+
+    @ViewBuilder
+    private var sendControl: some View {
+        if app.busy {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Button("Stop") { app.cancelSend() }
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+            }
+        } else {
+            Button {
+                app.send()
+            } label: {
+                Label("Send", systemImage: "paperplane.fill")
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!app.canSend)
+            .help("Send request (⌘↩)")
+            .accessibilityLabel("Send request")
+        }
+    }
+
+    private func badgeCount(_ section: Section) -> Int {
+        switch section {
+        case .params: draft.params.filter { !$0.disabled }.count
+        case .headers: draft.headers.filter { !$0.disabled }.count
+        case .captures: draft.captures.filter { !$0.disabled }.count
+        case .checks: draft.assertions.filter { !$0.disabled }.count
+        case .auth, .body, .settings: 0
+        }
+    }
+
+    @ViewBuilder
+    private var sectionContent: some View {
+        let committer = RequestCommitter { change in commit(change) }
+        switch section {
+        case .params: ScrollView { ParamRows(app: app, draft: draft, commit: committer) }
+        case .headers: ScrollView { HeaderRows(app: app, draft: draft, commit: committer) }
+        case .auth: ScrollView { AuthSection(app: app, draft: draft, commit: committer) }
+        case .body: BodySection(app: app, draft: draft, commit: committer)
+        case .captures: ScrollView { CaptureRows(app: app, draft: draft, commit: committer) }
+        case .checks: ScrollView { CheckRows(app: app, draft: draft, commit: committer) }
+        case .settings: ScrollView { SettingsSection(app: app, draft: draft, commit: committer) }
         }
     }
 
@@ -224,15 +296,28 @@ struct ParamRows: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        FieldTable {
+            TableRow(isHeader: true) {
+                Color.clear.frame(width: 18, height: 1)
+                Text("Type")
+                    .frame(width: 84, alignment: .leading)
+                Text("Name")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Value")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(width: 18, height: 1)
+            }
+
             ForEach(draft.params.indices, id: \.self) { index in
-                HStack(spacing: 6) {
+                TableRow {
                     Toggle("", isOn: Binding(
                         get: { !draft.params[index].disabled },
                         set: { newValue in update { snapshot in snapshot.params[index].disabled = !newValue } }
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                    .frame(width: 18)
+                    .accessibilityLabel("Enable parameter")
 
                     Picker("", selection: Binding(
                         get: { draft.params[index].kind },
@@ -242,50 +327,38 @@ struct ParamRows: View {
                         Text("Path").tag("path")
                     }
                     .labelsHidden()
+                    .controlSize(.small)
                     .frame(width: 84)
+                    .accessibilityLabel("Parameter location")
 
                     TextField("Name", text: Binding(
                         get: { draft.params[index].name },
                         set: { newValue in update { snapshot in snapshot.params[index].name = newValue } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityLabel("Parameter name")
 
                     TextField("Value", text: Binding(
                         get: { draft.params[index].value },
                         set: { newValue in update { snapshot in snapshot.params[index].value = newValue } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityLabel("Parameter value")
 
-                    removeButton { update { snapshot in snapshot.params.remove(at: index) } }
+                    RemoveRowButton(label: "Remove parameter") {
+                        update { snapshot in snapshot.params.remove(at: index) }
+                    }
                 }
+                .opacity(draft.params[index].disabled ? 0.5 : 1)
             }
-            addButton("Add parameter") {
+
+            AddRowButton(label: "Add parameter") {
                 update { snapshot in snapshot.params.append(OCParam(name: "", value: "", kind: "query", disabled: false)) }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-    }
-
-    private func removeButton(_ action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-        } label: {
-            Image(systemName: "minus.circle")
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-    }
-
-    private func addButton(_ label: String, _ action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-        } label: {
-            Label(label, systemImage: "plus.circle")
-        }
-        .buttonStyle(.plain)
-        .font(.callout)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
     }
 }
 
@@ -301,51 +374,55 @@ struct HeaderRows: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        FieldTable {
+            TableRow(isHeader: true) {
+                Color.clear.frame(width: 18, height: 1)
+                Text("Name")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Value")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(width: 18, height: 1)
+            }
+
             ForEach(draft.headers.indices, id: \.self) { index in
-                HStack(spacing: 6) {
+                TableRow {
                     Toggle("", isOn: Binding(
                         get: { !draft.headers[index].disabled },
                         set: { newValue in update { snapshot in snapshot.headers[index].disabled = !newValue } }
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                    .frame(width: 18)
+                    .accessibilityLabel("Enable header")
 
                     TextField("Name", text: Binding(
                         get: { draft.headers[index].name },
                         set: { newValue in update { snapshot in snapshot.headers[index].name = newValue } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
-
-                    Text(":")
-                        .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Header name")
 
                     TextField("Value", text: Binding(
                         get: { draft.headers[index].value },
                         set: { newValue in update { snapshot in snapshot.headers[index].value = newValue } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityLabel("Header value")
 
-                    Button {
+                    RemoveRowButton(label: "Remove header") {
                         update { snapshot in snapshot.headers.remove(at: index) }
-                    } label: {
-                        Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                 }
+                .opacity(draft.headers[index].disabled ? 0.5 : 1)
             }
-            Button {
+
+            AddRowButton(label: "Add header") {
                 update { snapshot in snapshot.headers.append(OCHeader(name: "", value: "", disabled: false)) }
-            } label: {
-                Label("Add header", systemImage: "plus.circle")
             }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .padding(16)
     }
 }
 
@@ -403,27 +480,38 @@ struct AuthSection: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 160)
+            .fixedSize()
+            .accessibilityLabel("Auth type")
 
             switch kind {
             case .basic:
-                TextField("Username (supports {{vars}})", text: Binding(
+                fieldLabel("Username")
+                TextField("Supports {{vars}}", text: Binding(
                     get: { usernameOf(draft.authKind) },
                     set: { newValue in commit { snapshot in snapshot.authKind = .basic(username: newValue, password: passwordOf(snapshot.authKind)) } }
                 ))
                 .font(.system(.callout, design: .monospaced))
-                SecureField("Password (supports {{vars}})", text: Binding(
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 460)
+                fieldLabel("Password")
+                SecureField("Supports {{vars}}", text: Binding(
                     get: { passwordOf(draft.authKind) },
                     set: { newValue in commit { snapshot in snapshot.authKind = .basic(username: usernameOf(snapshot.authKind), password: newValue) } }
                 ))
                 .font(.system(.callout, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 460)
             case .bearer:
-                TextField("Token (supports {{vars}})", text: Binding(
+                fieldLabel("Token")
+                TextField("Supports {{vars}}", text: Binding(
                     get: { tokenOf(draft.authKind) },
                     set: { newValue in commit { snapshot in snapshot.authKind = .bearer(token: newValue) } }
                 ))
                 .font(.system(.callout, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 460)
             case .apiKey:
+                fieldLabel("Key name")
                 TextField("Key name", text: Binding(
                     get: { apiKeyOf(draft.authKind).key },
                     set: { newValue in commit { snapshot in
@@ -432,6 +520,9 @@ struct AuthSection: View {
                     } }
                 ))
                 .font(.system(.callout, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 460)
+                fieldLabel("Value")
                 TextField("Value", text: Binding(
                     get: { apiKeyOf(draft.authKind).value },
                     set: { newValue in commit { snapshot in
@@ -440,6 +531,9 @@ struct AuthSection: View {
                     } }
                 ))
                 .font(.system(.callout, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 460)
+                fieldLabel("Add to")
                 Picker("Add to", selection: Binding(
                     get: { apiKeyOf(draft.authKind).placement },
                     set: { newValue in commit { snapshot in
@@ -450,23 +544,32 @@ struct AuthSection: View {
                     Text("Header").tag("header")
                     Text("Query").tag("query")
                 }
-                .frame(width: 140)
+                .labelsHidden()
+                .fixedSize()
             case .none:
                 Text("No authentication is applied.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             case .inherit:
                 Text("Inherits auth from the parent folder or collection at send time (v3 preserves this flag; folder-level defaults execution arrives later).")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             case .preserved:
                 Text("This request uses an auth type Gowa can render but not edit (e.g. OAuth2). It is preserved in the YAML exactly as stored.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
+            .padding(.bottom, -3)
     }
 
     private func usernameOf(_ kind: OAuthKind) -> String {
@@ -520,7 +623,9 @@ struct BodySection: View {
                         Text("XML").tag("xml")
                         Text("Form URL-Encoded").tag("form-urlencoded")
                     }
-                    .frame(width: 190)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityLabel("Body type")
 
                     if (draft.bodyType ?? "json") == "json" {
                         Button("Format") {
@@ -533,27 +638,28 @@ struct BodySection: View {
                     Spacer()
                 }
 
-                TextEditor(text: Binding(
-                    get: { draft.bodyData },
-                    set: { newValue in update { snapshot in snapshot.bodyData = newValue } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .textBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                CodeEditor(
+                    text: Binding(
+                        get: { draft.bodyData },
+                        set: { newValue in update { snapshot in snapshot.bodyData = newValue } }
+                    ),
+                    highlightsJSON: (draft.bodyType ?? "json") == "json"
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .frame(minHeight: 140)
+                .background(Theme.fieldFill)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                        .strokeBorder(Theme.hairline)
+                )
+                .frame(maxHeight: .infinity)
             } else {
                 Text("\(draft.method) requests do not carry a body")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(16)
     }
 }
 
@@ -565,26 +671,31 @@ struct CaptureRows: View {
     let commit: RequestCommitter
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("After this response, values are extracted and stored for the next requests. Runtime scope stays in memory only — never saved to the collection file.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            FieldTable {
             ForEach(draft.captures.indices, id: \.self) { index in
-                HStack(spacing: 6) {
+                TableRow {
                     Toggle("", isOn: Binding(
                         get: { !draft.captures[index].disabled },
                         set: { enabled in update { snapshot in snapshot.captures[index].disabled = !enabled } }
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                    .frame(width: 18)
+                    .accessibilityLabel("Enable capture")
 
                     TextField("{{variable}}", text: Binding(
                         get: { draft.captures[index].variableName },
                         set: { newName in update { snapshot in snapshot.captures[index].variableName = newName } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
-                    .frame(width: 140)
+                    .frame(width: 160)
+                    .accessibilityLabel("Variable name")
 
                     Text("from")
                         .foregroundStyle(.tertiary)
@@ -594,7 +705,9 @@ struct CaptureRows: View {
                         get: { draft.captures[index].expression },
                         set: { newExpression in update { snapshot in snapshot.captures[index].expression = newExpression } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityLabel("Capture expression")
 
                     Picker("", selection: Binding(
                         get: { draft.captures[index].scope },
@@ -604,19 +717,18 @@ struct CaptureRows: View {
                         Text("Environment").tag("environment")
                     }
                     .labelsHidden()
+                    .controlSize(.small)
                     .frame(width: 130)
+                    .accessibilityLabel("Capture scope")
 
-                    Button {
+                    RemoveRowButton(label: "Remove capture") {
                         update { snapshot in snapshot.captures.remove(at: index) }
-                    } label: {
-                        Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                 }
+                .opacity(draft.captures[index].disabled ? 0.5 : 1)
             }
 
-            Button {
+            AddRowButton(label: "Add capture") {
                 update { snapshot in
                     snapshot.captures.append(OCCapture(
                         variableName: "",
@@ -625,14 +737,11 @@ struct CaptureRows: View {
                         disabled: false
                     ))
                 }
-            } label: {
-                Label("Add capture", systemImage: "plus.circle")
             }
-            .buttonStyle(.plain)
-            .font(.callout)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
     }
 
     private func update(_ change: (inout OCRequestSnapshot) -> Void) {
@@ -650,26 +759,31 @@ struct CheckRows: View {
     static let operators = ["eq", "neq", "gt", "gte", "lt", "lte", "contains", "startsWith", "endsWith", "isString", "isNumber", "isBoolean", "exists", "notExists"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Checks run after every send and in folder runs. Expressions: res.status, res.time, res.body, res.body.<json path>, res.headers.<name>.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            FieldTable {
             ForEach(draft.assertions.indices, id: \.self) { index in
-                HStack(spacing: 6) {
+                TableRow {
                     Toggle("", isOn: Binding(
                         get: { !draft.assertions[index].disabled },
                         set: { enabled in commit { snapshot in snapshot.assertions[index].disabled = !enabled } }
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                    .frame(width: 18)
+                    .accessibilityLabel("Enable check")
 
                     TextField("res.status", text: Binding(
                         get: { draft.assertions[index].expression },
                         set: { newExpression in commit { snapshot in snapshot.assertions[index].expression = newExpression } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
-                    .frame(width: 200)
+                    .frame(width: 220)
+                    .accessibilityLabel("Check expression")
 
                     Picker("", selection: Binding(
                         get: { draft.assertions[index].op },
@@ -680,37 +794,35 @@ struct CheckRows: View {
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 110)
+                    .controlSize(.small)
+                    .frame(width: 120)
+                    .accessibilityLabel("Check operator")
 
                     TextField("value", text: Binding(
                         get: { draft.assertions[index].value },
                         set: { newValue in commit { snapshot in snapshot.assertions[index].value = newValue } }
                     ))
+                    .textFieldStyle(.plain)
                     .font(.system(.callout, design: .monospaced))
+                    .accessibilityLabel("Expected value")
                     .disabled(draft.assertions[index].op.hasPrefix("is") || draft.assertions[index].op == "exists" || draft.assertions[index].op == "notExists")
 
-                    Button {
+                    RemoveRowButton(label: "Remove check") {
                         commit { snapshot in snapshot.assertions.remove(at: index) }
-                    } label: {
-                        Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                 }
+                .opacity(draft.assertions[index].disabled ? 0.5 : 1)
             }
 
-            Button {
+            AddRowButton(label: "Add check") {
                 commit { snapshot in
                     snapshot.assertions.append(OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false))
                 }
-            } label: {
-                Label("Add check", systemImage: "plus.circle")
             }
-            .buttonStyle(.plain)
-            .font(.callout)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
     }
 }
 
@@ -720,13 +832,14 @@ struct SettingsSection: View {
     let app: AppState
     let draft: OCRequestSnapshot
     let commit: RequestCommitter
+    @State private var timeoutText = ""
 
     private func update(_ change: (inout OCRequestSnapshot) -> Void) {
         commit(change)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Toggle("Follow redirects", isOn: Binding(
                 get: { draft.settings.followRedirects ?? true },
                 set: { newValue in update { snapshot in snapshot.settings.followRedirects = newValue } }
@@ -734,18 +847,39 @@ struct SettingsSection: View {
             .toggleStyle(.checkbox)
 
             HStack(spacing: 8) {
-                Text("Timeout (ms, 0 = none)")
+                Text("Timeout (milliseconds)")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
-                TextField("0", text: Binding(
-                    get: { String(draft.settings.timeout ?? 0) },
-                    set: { newValue in update { snapshot in snapshot.settings.timeout = Int(newValue) } }
-                ))
-                .font(.system(.callout, design: .monospaced))
-                .frame(width: 100)
+                TextField("0 = no timeout", text: $timeoutText)
+                    .font(.system(.callout, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 130)
+                    .onSubmit(commitTimeout)
+                    .onDisappear { commitTimeout() }
+                    .accessibilityLabel("Request timeout in milliseconds")
+                Text("0 = no timeout")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .onAppear {
+            timeoutText = String(draft.settings.timeout ?? 0)
+        }
+        .onChange(of: draft.settings.timeout) { _, value in
+            let text = String(value ?? 0)
+            if Int(text) != value {
+                timeoutText = text
+            }
+        }
+    }
+
+    private func commitTimeout() {
+        let trimmed = timeoutText.trimmingCharacters(in: .whitespaces)
+        guard let value = Int(trimmed), value >= 0 else {
+            timeoutText = String(draft.settings.timeout ?? 0)
+            return
+        }
+        update { snapshot in snapshot.settings.timeout = value }
     }
 }

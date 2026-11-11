@@ -465,7 +465,7 @@ final class OpenCollectionDocument {
     private func writeRuntime(_ snapshot: OCRequestSnapshot, into item: inout [String: Any], preserving current: [String: Any]) {
         var runtime = current["runtime"] as? [String: Any] ?? [:]
 
-        var actions = runtime["actions"] as? [[String: Any]] ?? []
+        let actions = runtime["actions"] as? [[String: Any]] ?? []
         let otherActions = actions.filter { ($0["type"] as? String) != "set-variable" || (($0["phase"] as? String) ?? "after-response") != "after-response" }
         var ours: [[String: Any]] = []
         for capture in snapshot.captures where !capture.variableName.isEmpty && !capture.expression.isEmpty {
@@ -843,6 +843,12 @@ final class OpenCollectionDocument {
             snapshot.authKind = resolvedAuth(at: path) ?? .none
         }
         snapshot.headers = resolvedHeaders(at: path, requestHeaders: snapshot.headers)
+    }
+
+    func effectiveRequest(at path: NodePath, from snapshot: OCRequestSnapshot, variables: [String: String]) -> AppState.EffectiveRequest {
+        var snapshot = snapshot
+        applyInheritance(to: &snapshot, at: path)
+        return AppState.effectiveRequest(from: snapshot, variables: variables)
     }
 
     nonisolated static func interpolate(_ template: String, _ variables: [String: String]) -> String {

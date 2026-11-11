@@ -15,6 +15,7 @@ struct EnvironmentsSheet: View {
                 Spacer()
                 Button {
                     app.addEnvironment()
+                    selectedEnvironment = app.environments.last?.name
                 } label: {
                     Label("Add Environment", systemImage: "plus")
                 }
@@ -144,11 +145,20 @@ struct VariableRows: View {
 
     private var headerRow: some View {
         HStack(spacing: 8) {
-            Text("Name").font(.caption.weight(.medium)).frame(width: 160, alignment: .leading)
-            Text("Value").font(.caption.weight(.medium)).frame(maxWidth: .infinity, alignment: .leading)
-            Text("Secret").font(.caption.weight(.medium)).frame(width: 54)
-            Text("On").font(.caption.weight(.medium)).frame(width: 34)
-            Text("").frame(width: 22)
+            Text("Name")
+                .font(.caption.weight(.medium))
+                .frame(width: 160, alignment: .leading)
+            Text("Value")
+                .font(.caption.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Secret")
+                .font(.caption.weight(.medium))
+                .frame(width: 54)
+            Text("Enabled")
+                .font(.caption.weight(.medium))
+                .frame(width: 54)
+            Text("")
+                .frame(width: 22)
         }
         .padding(.horizontal, 12)
         .foregroundStyle(.secondary)
@@ -195,12 +205,14 @@ struct VariableRow: View {
                 .font(.system(.callout, design: .monospaced))
                 .frame(width: 160)
                 .onSubmit { commitName() }
+                .accessibilityLabel("Variable name")
 
             if variable.secret {
                 SecureField(isStored ? "•••• stored in Keychain" : "Enter value — stored in Keychain",
                             text: $editingValue)
                     .font(.system(.callout, design: .monospaced))
                     .onSubmit { commitValue() }
+                    .accessibilityLabel("Secret variable value")
                     .onDisappear { commitValue() }
 
                 if isStored {
@@ -212,6 +224,7 @@ struct VariableRow: View {
                 TextField("", text: $editingValue)
                     .font(.system(.callout, design: .monospaced))
                     .onSubmit { commitValue() }
+                    .accessibilityLabel("Variable value")
             }
 
             Toggle("", isOn: Binding(
@@ -221,6 +234,7 @@ struct VariableRow: View {
             .labelsHidden()
             .frame(width: 54)
             .help("Secret values are stored in the macOS Keychain, not in the collection file")
+            .accessibilityLabel("Store variable as a secret")
 
             Toggle("", isOn: Binding(
                 get: { !variable.disabled },
@@ -233,7 +247,8 @@ struct VariableRow: View {
                 }
             ))
             .labelsHidden()
-            .frame(width: 34)
+            .frame(width: 54)
+            .accessibilityLabel("Enable variable")
 
             Button {
                 app.deleteVariable(variable.name, in: environment.name)
@@ -242,6 +257,7 @@ struct VariableRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .accessibilityLabel("Delete variable")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)

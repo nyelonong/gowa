@@ -73,3 +73,24 @@ func documentID() {
     let gowa = extensions?["gowa"] as? [String: Any]
     #expect((gowa?["id"] as? String) == first)
 }
+
+@MainActor
+@Test("only unset secrets a request uses block its send")
+func missingSecretsUsedByRequest() {
+    let snapshot = OCRequestSnapshot(
+        name: "r",
+        method: "GET",
+        url: "{{baseUrl}}/stats",
+        params: [OCParam(name: "key", value: "{{queryKey}}", kind: "query", disabled: true)],
+        headers: [OCHeader(name: "Access_token", value: "{{accessToken}}", disabled: false)],
+        bodyType: nil,
+        bodyData: "",
+        authKind: .bearer(token: "{{bearer}}"),
+        settings: OCSettings(followRedirects: nil, timeout: nil),
+        docs: nil
+    )
+    let missing = ["accessToken", "apiKey", "queryKey", "bearer"]
+
+    #expect(AppState.missingSecrets(usedBy: snapshot, missing: missing, variables: [:]) == ["accessToken", "bearer"])
+    #expect(AppState.missingSecrets(usedBy: snapshot, missing: missing, variables: ["bearer": "captured"]) == ["accessToken"])
+}

@@ -18,6 +18,41 @@ struct SidebarNode: Identifiable {
     var isFolder: Bool { node.isFolder }
 }
 
+extension SidebarNode {
+    /// Keeps requests whose method, name, and URL together contain every
+    /// word of `query`. A folder whose own name matches keeps its whole subtree.
+    static func filter(_ tree: [SidebarNode], query: String) -> [SidebarNode] {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return tree }
+
+        func matches(_ text: String) -> Bool {
+            let haystack = text.lowercased()
+            return words.allSatisfy(haystack.contains)
+        }
+
+        func keep(_ nodes: [SidebarNode]) -> [SidebarNode] {
+            nodes.compactMap { item in
+                if item.isFolder {
+                    if matches(item.name) { return item }
+                    let children = keep(item.children)
+                    return children.isEmpty ? nil : SidebarNode(node: item.node, children: children)
+                }
+                let text = [item.node.method, item.name, item.node.url].compactMap { $0 }.joined(separator: " ")
+                return matches(text) ? item : nil
+            }
+        }
+        return keep(tree)
+    }
+
+    static func firstRequest(in tree: [SidebarNode]) -> SidebarNode? {
+        for item in tree {
+            if !item.isFolder { return item }
+            if let found = firstRequest(in: item.children) { return found }
+        }
+        return nil
+    }
+}
+
 @MainActor
 @Observable
 final class AppState {
@@ -50,6 +85,18 @@ final class AppState {
 
     // Send state
     var busy = false
+    private var sendTask: Task<Void, Never>?
+    private var sendRequestID: UUID?
+    var sendValidationMessage: String? {
+        guard let draft else { return nil }
+        let url = draft.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return "Enter a URL before sending" }
+        guard url.contains("{{") || url.hasPrefix("http://") || url.hasPrefix("https://") else {
+            return "URL must start with http:// or https://"
+        }
+        guard url.contains("{{") || URL(string: url) != nil else { return "Enter a valid URL" }
+        return nil
+    }
     var result: HTTPResult?
     var bodyDisplay: BodyDisplay?
     var errorText: String?
@@ -90,12 +137,12 @@ final class AppState {
         UserDefaults.standard.set(path, forKey: Self.lastCollectionKey)
     }
 
-    var canSend: Bool { draft != nil && !busy }
+    var canSend: Bool { draft != nil && !busy && sendValidationMessage == nil }
     // MARK: - Collection lifecycle
 
     func newCollection() {
         let doc = OpenCollectionDocument.sample()
-        var starter = OCRequestSnapshot(
+        let starter = OCRequestSnapshot(
             name: "My First Request",
             method: "GET",
             url: "{{baseUrl}}/users",
@@ -186,6 +233,7 @@ final class AppState {
     }
 
     private func apply(_ doc: OpenCollectionDocument) {
+        invalidateActiveSend()
         document = doc
         rememberCurrentCollection()
         hasUnsavedChanges = false
@@ -202,7 +250,7 @@ final class AppState {
         rebuildSidebar()
         let envs = doc.environments
         environments = envs
-        activeEnvironment = envs.first?.name
+        activeEnvironment = nil
     }
 
     private func rebuildSidebar() {
@@ -232,6 +280,9 @@ final class AppState {
 
     func select(path: NodePath) {
         guard let doc = document else { return }
+        if selectedRequestPath != path, busy {
+            invalidateActiveSend()
+        }
         if let snapshot = doc.requestSnapshot(at: path) {
             selectedRequestPath = path
             draft = snapshot
@@ -373,7 +424,11 @@ final class AppState {
     func copyAsCurl() {
         guard let snapshot = draft else { return }
         let vars = document?.resolveVariables(in: activeEnvironment).values ?? [:]
-        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
+        let effective = if let doc = document, let path = selectedRequestPath {
+            doc.effectiveRequest(at: path, from: snapshot, variables: vars)
+        } else {
+            Self.effectiveRequest(from: snapshot, variables: vars)
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(CurlBuilder.command(from: effective), forType: .string)
@@ -383,7 +438,7 @@ final class AppState {
     func copyAsCurl(at path: NodePath) {
         guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else { return }
         let vars = doc.resolveVariables(in: activeEnvironment).values
-        let effective = Self.effectiveRequest(from: snapshot, variables: vars)
+        let effective = doc.effectiveRequest(at: path, from: snapshot, variables: vars)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(CurlBuilder.command(from: effective), forType: .string)
@@ -443,7 +498,7 @@ final class AppState {
         guard let doc = document else { return }
         environments = doc.environments
         if let active = activeEnvironment, !environments.contains(where: { $0.name == active }) {
-            activeEnvironment = environments.first?.name
+            activeEnvironment = nil
         }
         rebuildSidebar()
     }
@@ -545,7 +600,11 @@ final class AppState {
             doc.applyInheritance(to: &snapshot, at: path)
         }
         let resolution = document?.resolveVariables(in: activeEnvironment) ?? (values: [:], missingSecrets: [])
-        let missing = resolution.missingSecrets
+        var vars = resolution.values
+        for (name, value) in sessionVariables {
+            vars[name] = value // session captures win over environment values
+        }
+        let missing = Self.missingSecrets(usedBy: snapshot, missing: resolution.missingSecrets, variables: vars)
         if !missing.isEmpty {
             let names = missing.map { "\"\($0)\"" }.joined(separator: ", ")
             errorText = "Secret \(names) has no stored value. Open Environments to set it — secret values live in the macOS Keychain, never in the collection file."
@@ -557,22 +616,26 @@ final class AppState {
         errorText = nil
         lastAssertions = []
 
-        var vars = resolution.values
-        for (name, value) in sessionVariables {
-            vars[name] = value // session captures win over environment values
-        }
         let effective = Self.effectiveRequest(from: snapshot, variables: vars)
         let method = HTTPMethod(rawValue: effective.method) ?? .GET
+        let requestID = UUID()
+        sendRequestID = requestID
 
-        Task {
+        sendTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard self.sendRequestID == requestID else { return }
             do {
-                let client = HTTPClient(followRedirects: effective.followRedirects)
+                let client = HTTPClient(
+                    followRedirects: effective.followRedirects,
+                    timeoutSeconds: effective.timeout ?? 30
+                )
                 let response = try await client.send(
                     method: method,
                     urlText: effective.url,
                     body: effective.body,
                     headers: effective.headers
                 )
+                try Task.checkCancellation()
                 self.result = response
                 self.history.record(method: method, url: effective.url, body: effective.body, status: response.status)
                 self.runCaptures(for: snapshot, response: response)
@@ -590,13 +653,34 @@ final class AppState {
                 let display = await Task.detached(priority: .userInitiated) {
                     BodyDisplay.build(response, bodyText: bodyText)
                 }.value
+                try Task.checkCancellation()
                 self.bodyDisplay = display
+            } catch is CancellationError {
+                self.errorText = "Request cancelled"
+            } catch let error as URLError where error.code == .cancelled {
+                self.errorText = "Request cancelled"
             } catch {
                 self.errorText = error.localizedDescription
                 self.history.record(method: method, url: effective.url, body: effective.body, status: nil)
             }
+            guard self.sendRequestID == requestID else { return }
+            self.sendRequestID = nil
             self.busy = false
+            self.sendTask = nil
         }
+    }
+
+    func cancelSend() {
+        guard busy else { return }
+        sendTask?.cancel()
+        statusMessage = "Cancelling request…"
+    }
+
+    private func invalidateActiveSend() {
+        sendRequestID = nil
+        sendTask?.cancel()
+        sendTask = nil
+        busy = false
     }
 
     private func runCaptures(for snapshot: OCRequestSnapshot, response: HTTPResult) {
@@ -674,6 +758,7 @@ final class AppState {
 
         var summary: String {
             if running { return "\(passedCount) passed · \(failedCount) failed · running…" }
+            if cancelled { return "\(passedCount) passed · \(failedCount) failed · cancelled" }
             return "\(passedCount) passed · \(failedCount) failed · \(errorCount) errors"
         }
     }
@@ -681,6 +766,7 @@ final class AppState {
     let runner = RunnerState()
     var showingRunner = false
     private var runnerSkipRemaining = false
+    private var runnerTask: Task<Void, Never>?
 
     /// Depth-first requests under `path` (nil = whole collection), in tree order.
     func runnerRequests(under path: NodePath?) -> [NodePath] {
@@ -716,21 +802,27 @@ final class AppState {
         runner.errorCount = 0
         showingRunner = true
 
-        Task { await runSequence(paths) }
+        runnerTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runSequence(paths)
+        }
     }
 
     func stopRunner() {
         runner.cancelled = true
         runnerSkipRemaining = true
+        runnerTask?.cancel()
     }
 
     private func runSequence(_ paths: [NodePath]) async {
         runnerSkipRemaining = false
         let vars = effectiveVariablesWithSession()
         for index in paths.indices {
-            if runnerSkipRemaining {
-                runner.entries[index].state = .skipped
-                continue
+            if runnerSkipRemaining || Task.isCancelled {
+                for remainingIndex in paths.indices.dropFirst(index) {
+                    runner.entries[remainingIndex].state = .skipped
+                }
+                break
             }
             runner.entries[index].state = .running
             let outcome = await runOne(at: paths[index], variables: vars)
@@ -746,6 +838,7 @@ final class AppState {
             }
         }
         runner.running = false
+        runnerTask = nil
     }
 
     private func effectiveVariablesWithSession() -> [String: String] {
@@ -764,17 +857,19 @@ final class AppState {
     }
 
     private func runOne(at path: NodePath, variables: [String: String]) async -> SingleRunOutcome {
-        guard let doc = document, var snapshot = doc.requestSnapshot(at: path) else {
+        guard let doc = document, let snapshot = doc.requestSnapshot(at: path) else {
             return SingleRunOutcome(state: .error, detail: "request not found", elapsedText: nil, outcomes: [])
         }
-        doc.applyInheritance(to: &snapshot, at: path)
-        let effective = Self.effectiveRequest(from: snapshot, variables: variables)
+        let effective = doc.effectiveRequest(at: path, from: snapshot, variables: variables)
         let method = HTTPMethod(rawValue: effective.method) ?? .GET
 
         let clock = ContinuousClock()
         let start = clock.now
         do {
-            let client = HTTPClient(followRedirects: effective.followRedirects)
+            let client = HTTPClient(
+                followRedirects: effective.followRedirects,
+                timeoutSeconds: effective.timeout ?? 30
+            )
             let response = try await client.send(
                 method: method,
                 urlText: effective.url,
@@ -829,9 +924,12 @@ final class AppState {
         var timeout: Int?
     }
 
-    /// Interpolate variables, apply auth, and fold query params into the URL.
+    /// Interpolate variables, apply auth, fill path params and fold query params into the URL.
     static func effectiveRequest(from snapshot: OCRequestSnapshot, variables: [String: String]) -> EffectiveRequest {
-        let url = interpolate(snapshot.url, variables)
+        let pathParams = snapshot.params
+            .filter { !$0.disabled && !$0.name.isEmpty && $0.kind == "path" }
+            .map { (name: $0.name, value: interpolate($0.value, variables)) }
+        let url = substitutePathParams(interpolate(snapshot.url, variables), pathParams)
         let headerList = snapshot.headers
             .filter { !$0.disabled && !$0.name.isEmpty }
             .map { (name: interpolate($0.name, variables), value: interpolate($0.value, variables)) }
@@ -874,6 +972,38 @@ final class AppState {
             followRedirects: snapshot.settings.followRedirects ?? true,
             timeout: snapshot.settings.timeout
         )
+    }
+
+    /// Unset secrets this request refers to as `{{name}}`; unrelated unset secrets do not block it.
+    static func missingSecrets(usedBy snapshot: OCRequestSnapshot, missing: [String], variables: [String: String]) -> [String] {
+        var parts = [snapshot.url, snapshot.bodyData]
+        parts += snapshot.params.filter { !$0.disabled }.flatMap { [$0.name, $0.value] }
+        parts += snapshot.headers.filter { !$0.disabled }.flatMap { [$0.name, $0.value] }
+        switch snapshot.authKind {
+        case .basic(let username, let password): parts += [username, password]
+        case .bearer(let token): parts.append(token)
+        case .apiKey(let key, let value, _): parts += [key, value]
+        case .none, .inherit, .preserved: break
+        }
+        let text = parts.joined(separator: "\n")
+        return missing.filter { variables[$0] == nil && text.contains("{{\($0)}}") }
+    }
+
+    /// Replaces each `:name` path segment; a param with no value leaves its segment as typed.
+    static func substitutePathParams(_ url: String, _ params: [(name: String, value: String)]) -> String {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+        var result = url
+        for param in params where !param.value.isEmpty {
+            let encoded = param.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? param.value
+            let pattern = "/:" + NSRegularExpression.escapedPattern(for: param.name) + "(?=[/?#]|$)"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: "/" + NSRegularExpression.escapedTemplate(for: encoded)
+            )
+        }
+        return result
     }
 
     static func appendQuery(_ url: String, _ params: [(name: String, value: String)]) -> String {

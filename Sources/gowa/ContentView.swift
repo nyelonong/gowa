@@ -9,7 +9,7 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .navigationTitle("Gowa")
+        .navigationTitle(app.draft?.name ?? app.document?.name ?? "Gowa")
         .frame(minWidth: 960, minHeight: 620)
         .alert("Couldn't open collection", isPresented: Binding(
             get: { app.openErrorMessage != nil },
@@ -26,17 +26,25 @@ struct ContentView: View {
             if app.document == nil {
                 welcome
             } else {
-            VStack(spacing: 0) {
-                if !app.missingSecrets.isEmpty {
-                    missingSecretsBar
-                }
-                RequestEditor(app: app)
-                if app.draft != nil {
-                    Divider()
-                    ResponseArea(app: app)
+                VStack(spacing: 0) {
+                    if !app.missingSecrets.isEmpty {
+                        missingSecretsBar
+                    }
+
+                    if app.draft != nil {
+                        VSplitView {
+                            RequestEditor(app: app)
+                                .id(app.selectedRequestPath)
+                                .frame(minHeight: 300)
+                            ResponseArea(app: app)
+                                .frame(minHeight: 180)
+                                .layoutPriority(1)
+                        }
+                    } else {
+                        RequestEditor(app: app)
+                    }
                 }
             }
-        }
         }
         .sheet(isPresented: Binding(
             get: { app.showingEnvironmentManager },
@@ -56,32 +64,80 @@ struct ContentView: View {
         )) {
             RunnerSheet(app: app)
         }
+        .toolbar {
+            if app.document != nil {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    environmentMenu
+
+                    Button {
+                        app.startRunner(under: nil)
+                    } label: {
+                        Label("Run All", systemImage: "play.fill")
+                    }
+                    .help("Run all requests (top to bottom)")
+
+                    Button {
+                        app.saveCollection()
+                    } label: {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(!app.hasUnsavedChanges && app.document?.url != nil)
+                    .help("Save collection (⌘S)")
+                }
+            }
+        }
+    }
+
+    private var environmentMenu: some View {
+        Menu {
+            Picker("Environment", selection: Binding(
+                get: { app.activeEnvironment ?? "" },
+                set: { app.activeEnvironment = $0.isEmpty ? nil : $0 }
+            )) {
+                Text("No environment").tag("")
+                ForEach(app.environments) { environment in
+                    Text(environment.name).tag(environment.name)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+
+            Divider()
+            Button("Manage Environments…") { app.showingEnvironmentManager = true }
+        } label: {
+            Label(app.activeEnvironment ?? "No environment", systemImage: "globe")
+                .labelStyle(.titleAndIcon)
+        }
+        .help("Choose or manage the active environment")
+        .accessibilityLabel("Active environment: \(app.activeEnvironment ?? "none")")
     }
 
     private var missingSecretsBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.slash")
                 .foregroundStyle(.orange)
-            Text("Secret not stored: \(app.missingSecrets.joined(separator: ", ")) — sends will fail until it is set")
+            Text("Secret not stored: \(app.missingSecrets.joined(separator: ", ")) — requests that use it will not send until it is set")
                 .font(.callout)
             Button("Set it") { app.showingEnvironmentManager = true }
                 .controlSize(.small)
             Spacer()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(.orange.opacity(0.08))
+        .padding(.vertical, 7)
+        .background(.orange.opacity(0.10))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var welcome: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 96, height: 96)
+                .accessibilityHidden(true)
             Text("Gowa")
                 .font(.largeTitle.weight(.bold))
             Text("A fast HTTP client with collections you keep in git.")
-                .font(.callout)
+                .font(.title3)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
@@ -105,7 +161,7 @@ struct ContentView: View {
                 .controlSize(.large)
                 .keyboardShortcut("o")
             }
-            .padding(.top, 8)
+            .padding(.top, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

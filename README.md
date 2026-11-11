@@ -38,6 +38,9 @@ swift build -c release && scripts/make-app.sh
   spec auth types (OAuth2, AWS, digest…) are preserved exactly in the YAML.
 - **Environments & variables** — `{{name}}` placeholders interpolate into
   URLs, params, headers, bodies, and auth from the active environment.
+- **Safe request execution** — environments are selected explicitly (Gowa
+  never silently chooses the first one), URLs validate before sending, request
+  timeouts are honored, and Stop cancels active sends and collection runs.
 - **Secrets stay out of git** — mark a variable as Secret and its value is
   stored in the macOS Keychain; the collection file only ever contains the
   variable name. (Tip: keep credentials in secret variables and reference
