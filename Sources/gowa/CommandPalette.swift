@@ -112,7 +112,7 @@ struct CommandPalette: View {
                 case .request:
                     Text(item.badge ?? "")
                         .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(item.badge == "GQL" ? Color.pink : Theme.methodColor(item.badge))
+                        .foregroundStyle(["GQL": Color.pink, "WS": .teal, "gRPC": .indigo][item.badge ?? ""] ?? Theme.methodColor(item.badge))
                 case .environment:
                     Image(systemName: "globe").foregroundStyle(.secondary)
                 case .action:
@@ -153,7 +153,7 @@ struct CommandPalette: View {
                     kind: .request,
                     title: node.name,
                     subtitle: (folders + [node.url ?? ""]).joined(separator: " › "),
-                    badge: node.kind == "graphql" ? "GQL" : Theme.shortMethod(node.method),
+                    badge: Theme.badge(kind: node.kind, method: node.method),
                     run: { app.select(path: node.path) }
                 ))
             }
@@ -168,6 +168,7 @@ struct CommandPalette: View {
         }
         let actions: [(String, String, @MainActor () -> Void)] = [
             ("New Request", "", { app.addRequest(under: nil) }),
+            ("New WebSocket", "", { app.addWebSocket(under: nil) }),
             ("New Folder", "", { app.addFolder(under: nil) }),
             ("Paste cURL…", "Import a request", { app.showingCurlImport = true }),
             ("Send Request", "⌘↩", { app.send() }),

@@ -193,6 +193,7 @@ struct CollectionSidebar: View {
 
             Menu {
                 Button("New Request") { app.addRequest(under: nil) }
+                Button("New WebSocket") { app.addWebSocket(under: nil) }
                 Button("New Folder") { app.addFolder(under: nil) }
                 Divider()
                 Button("Paste cURL…") { app.showingCurlImport = true }
@@ -365,6 +366,7 @@ struct SidebarRow: View {
             Button("Folder Settings…") { app.editingDefaults = .folder(node.node.path) }
             Divider()
             Button("New Request") { app.addRequest(under: node.node.path) }
+            Button("New WebSocket") { app.addWebSocket(under: node.node.path) }
             Button("New Folder") { app.addFolder(under: node.node.path) }
             Divider()
             Button("Rename…") { app.beginRename(node.node.path) }
@@ -376,9 +378,9 @@ struct SidebarRow: View {
 
     private var requestLabel: some View {
         HStack(spacing: 6) {
-            Text(node.node.kind == "graphql" ? "GQL" : Theme.shortMethod(node.node.method))
+            Text(Theme.badge(kind: node.node.kind, method: node.node.method))
                 .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(node.node.kind == "graphql" ? Color.pink : Theme.methodColor(node.node.method))
+                .foregroundStyle(Theme.badgeColor(kind: node.node.kind, method: node.node.method))
                 .frame(width: 36, alignment: .trailing)
                 .accessibilityLabel(node.node.method ?? "HTTP")
             Text(node.name)

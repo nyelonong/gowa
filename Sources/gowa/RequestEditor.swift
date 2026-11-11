@@ -746,7 +746,7 @@ struct SettingsSection: View {
 /// AppKit focuses a window's first text field with its text selected, so one
 /// stray key would rename the request. This clears that automatic focus once
 /// the editor is in a window, including windows that aren't key yet.
-private struct InitialFocusClearer: NSViewRepresentable {
+struct InitialFocusClearer: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { ClearingView() }
     func updateNSView(_ view: NSView, context: Context) {}
 

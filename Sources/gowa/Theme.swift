@@ -45,6 +45,25 @@ enum Theme {
         }
     }
 
+    /// Sidebar badge: the HTTP method, or the protocol for other item types.
+    static func badge(kind: String, method: String?) -> String {
+        switch kind {
+        case "graphql": "GQL"
+        case "websocket": "WS"
+        case "grpc": "gRPC"
+        default: shortMethod(method)
+        }
+    }
+
+    static func badgeColor(kind: String, method: String?) -> Color {
+        switch kind {
+        case "graphql": .pink
+        case "websocket": .teal
+        case "grpc": .indigo
+        default: methodColor(method)
+        }
+    }
+
     static func shortMethod(_ method: String?) -> String {
         switch method?.uppercased() {
         case "DELETE": "DEL"

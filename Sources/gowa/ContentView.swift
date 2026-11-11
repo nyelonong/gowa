@@ -55,6 +55,9 @@ struct ContentView: View {
                                     .layoutPriority(1)
                             }
                         }
+                    } else if let socket = app.socketDraft {
+                        WebSocketView(app: app, draft: socket)
+                            .id(app.selectedRequestPath)
                     } else {
                         RequestEditor(app: app)
                     }

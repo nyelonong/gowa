@@ -162,8 +162,8 @@ final class AppState {
 
     private static let lastCollectionKey = "gowa.lastCollection"
 
-    init() {
-        restoreLastCollection()
+    init(restoringLastCollection: Bool = true) {
+        if restoringLastCollection { restoreLastCollection() }
     }
 
     /// Reopens the most recently opened or saved collection at launch.
@@ -361,6 +361,9 @@ final class AppState {
             Task { @MainActor in self?.cookieRevision += 1 }
         }
         cookieJar = jar
+        socket.disconnect(reason: nil)
+        socket.clear()
+        socketDraft = nil
         gitStatus = nil
         refreshGitStatus()
         oauthClient = OAuth2Client(collectionID: doc.documentID)
@@ -412,7 +415,16 @@ final class AppState {
         if selectedRequestPath != path, busy {
             invalidateActiveSend()
         }
-        if let snapshot = doc.requestSnapshot(at: path) {
+        if selectedRequestPath != path {
+            socket.disconnect()
+            socket.clear()
+        }
+        socketDraft = nil
+        if let snapshot = doc.webSocketSnapshot(at: path) {
+            selectedRequestPath = path
+            draft = nil
+            socketDraft = snapshot
+        } else if let snapshot = doc.requestSnapshot(at: path) {
             selectedRequestPath = path
             draft = snapshot
             result = nil
@@ -429,6 +441,64 @@ final class AppState {
             selectedRequestPath = nil
             draft = nil
         }
+    }
+
+    // MARK: - WebSocket
+
+    var socketDraft: OCWebSocketSnapshot?
+    let socket = WebSocketConnection()
+
+    func addWebSocket(under parent: NodePath?) {
+        guard let doc = document else { return }
+        let name = uniqueName("New WebSocket", among: siblingNames(under: parent))
+        let path = doc.addWebSocket(under: parent, OCWebSocketSnapshot(name: name, url: "wss://"))
+        markDirtyAndRebuild()
+        select(path: path)
+    }
+
+    func updateSocketDraft(_ snapshot: OCWebSocketSnapshot) {
+        guard let doc = document, let path = selectedRequestPath else { return }
+        socketDraft = snapshot
+        doc.updateWebSocket(at: path, snapshot)
+        hasUnsavedChanges = true
+        rebuildSidebar()
+    }
+
+    /// Connects with the same variables, inherited headers and auth, cookies,
+    /// proxy, and TLS settings an HTTP request would use.
+    func connectSocket() {
+        guard let snapshot = socketDraft else { return }
+        let path = selectedRequestPath
+        let executor = RequestExecutor(document: document, environment: activeEnvironment, cookies: cookieJar, oauth: oauthClient)
+        Task { @MainActor in
+            do {
+                let prepared = try executor.prepare(snapshot.upgradeRequest, at: path, session: sessionVariables)
+                var effective = prepared.effective
+                if case .oauth2(let config) = prepared.snapshot.authKind {
+                    try await executor.applyOAuth2(config.interpolated(prepared.variables), to: &effective)
+                }
+                guard let url = URL(string: effective.url), ["ws", "wss"].contains(url.scheme?.lowercased() ?? "") else {
+                    throw HTTPError.invalidURL("WebSocket URLs start with ws:// or wss://")
+                }
+                let network = try document.map {
+                    try NetworkOptions.resolve($0.networkSettings, variables: prepared.variables, baseDirectory: $0.url?.deletingLastPathComponent(), cookies: cookieJar)
+                } ?? .none
+                socket.connect(url: url, headers: effective.headers, network: network, timeout: 30)
+            } catch {
+                socket.disconnect(reason: nil)
+                statusMessage = error.localizedDescription
+                socketError = error.localizedDescription
+            }
+        }
+    }
+
+    var socketError: String?
+
+    /// Sends the composed message with `{{variables}}` resolved.
+    func sendSocketMessage() {
+        guard let snapshot = socketDraft else { return }
+        let values = RequestExecutor(document: document, environment: activeEnvironment).variables(at: selectedRequestPath, session: sessionVariables).values
+        socket.send(OpenCollectionDocument.interpolate(snapshot.message, values), binary: snapshot.messageType == "binary")
     }
 
     func updateDraft(_ snapshot: OCRequestSnapshot) {
@@ -518,6 +588,10 @@ final class AppState {
     func duplicate(_ path: NodePath) {
         guard let doc = document else { return }
         doc.duplicate(at: path)
+        if let selected = selectedRequestPath {
+            selectedRequestPath = OpenCollectionDocument.adjust(selected, inserting: path.dropLast() + [path.last! + 1])
+        }
+        lastBodyByKey = [:]
         markDirtyAndRebuild()
     }
 
@@ -527,7 +601,12 @@ final class AppState {
         if selectedRequestPath?.starts(with: path) == true {
             selectedRequestPath = nil
             draft = nil
+            socketDraft = nil
+            socket.disconnect(reason: nil)
+        } else if let selected = selectedRequestPath {
+            selectedRequestPath = OpenCollectionDocument.adjust(selected, removing: path)
         }
+        lastBodyByKey = [:]
         markDirtyAndRebuild()
     }
 

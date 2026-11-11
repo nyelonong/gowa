@@ -311,7 +311,7 @@ final class OpenCollectionDocument {
         return current
     }
 
-    private func item(at path: NodePath) -> [String: Any]? {
+    func item(at path: NodePath) -> [String: Any]? {
         var level = root["items"] as? [[String: Any]] ?? []
         var current: [String: Any]?
         for index in path {
@@ -434,6 +434,17 @@ final class OpenCollectionDocument {
         return adjusted
     }
 
+    /// `path` after an item is inserted at `inserted`.
+    nonisolated static func adjust(_ path: NodePath, inserting inserted: NodePath) -> NodePath {
+        let depth = inserted.count - 1
+        guard path.count > depth, Array(path.prefix(depth)) == Array(inserted.prefix(depth)), path[depth] >= inserted[depth] else {
+            return path
+        }
+        var adjusted = path
+        adjusted[depth] += 1
+        return adjusted
+    }
+
     /// `path` after the item at `removed` is deleted.
     nonisolated static func adjust(_ path: NodePath, removing removed: NodePath) -> NodePath {
         let depth = removed.count - 1
@@ -445,7 +456,7 @@ final class OpenCollectionDocument {
         return adjusted
     }
 
-    private func append(_ entry: [String: Any], under parent: NodePath?) -> NodePath {
+    func append(_ entry: [String: Any], under parent: NodePath?) -> NodePath {
         if let parent {
             var parentItem = item(at: parent) ?? [:]
             var items = parentItem["items"] as? [[String: Any]] ?? []
@@ -461,7 +472,7 @@ final class OpenCollectionDocument {
         }
     }
 
-    private func write(_ item: [String: Any], at path: NodePath) {
+    func write(_ item: [String: Any], at path: NodePath) {
         guard let last = path.last else { root = item; return }
         guard var level = parentLevel(for: path), last < level.count else { return }
         level[last] = item
@@ -754,7 +765,7 @@ final class OpenCollectionDocument {
     }
 
     /// Spec `auth` block; nil for `.preserved`, whose original block stays untouched.
-    private func authDict(_ kind: OAuthKind, existing: [String: Any]? = nil) -> [String: Any]? {
+    func authDict(_ kind: OAuthKind, existing: [String: Any]? = nil) -> [String: Any]? {
         switch kind {
         case .oauth2(let config): config.dict(merging: existing ?? [:])
         case .none: ["type": "none"]
@@ -766,7 +777,7 @@ final class OpenCollectionDocument {
         }
     }
 
-    private func readAuthDict(_ auth: [String: Any]) -> OAuthKind {
+    func readAuthDict(_ auth: [String: Any]) -> OAuthKind {
         guard let type = auth["type"] as? String else { return .none }
         switch type {
         case "none": return .none

@@ -65,3 +65,21 @@ func moveRemapsSelection() {
     #expect(doc.enumerate().first { $0.path == [2, 1, 0] }?.name == "h1")
     #expect(doc.enumerate().first { $0.path == [2, 0, 1] }?.name == "f2")
 }
+
+@MainActor
+@Test("deleting or duplicating an earlier item keeps the selection on the same request")
+func selectionFollowsDeleteAndDuplicate() {
+    let app = AppState(restoringLastCollection: false)
+    let doc = tree()
+    app.document = doc
+    app.select(path: [2])
+    #expect(app.draft?.name == "b")
+
+    app.delete([0])
+    #expect(app.selectedRequestPath == [1])
+    #expect(app.document?.requestSnapshot(at: app.selectedRequestPath!)?.name == "b")
+
+    app.duplicate([0])
+    #expect(app.selectedRequestPath == [2])
+    #expect(app.document?.requestSnapshot(at: app.selectedRequestPath!)?.name == "b")
+}
