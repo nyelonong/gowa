@@ -27,6 +27,7 @@ struct HTTPResult: Sendable {
     let finalURL: URL
     var timings: [TimingPhase] = []
     var requestHeaders: [(name: String, value: String)] = []
+    var events: [SSEEvent] = []
 
     var statusPhrase: String {
         Self.phrase(for: status)
@@ -92,7 +93,8 @@ struct HTTPClient: Sendable {
         method: String,
         urlText: String,
         body: Data?,
-        headers: [(name: String, value: String)]
+        headers: [(name: String, value: String)],
+        onEvent: (@Sendable (SSEEvent) -> Void)? = nil
     ) async throws -> HTTPResult {
         let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") else {
@@ -126,12 +128,20 @@ struct HTTPClient: Sendable {
             config.connectionProxyDictionary = proxy
         }
         let delegate = TransferDelegate(followRedirects: followRedirects, network: network, explicitCookie: headers.contains { $0.name.caseInsensitiveCompare("Cookie") == .orderedSame })
+        delegate.onEvent = onEvent
         let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
         let clock = ContinuousClock()
         let start = clock.now
-        let (data, response) = try await session.data(for: request)
+        let task = session.dataTask(with: request)
+        let (data, response) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                delegate.start(task, continuation: continuation)
+            }
+        } onCancel: {
+            task.cancel()
+        }
         let elapsed = start.duration(to: clock.now)
 
         guard let http = response as? HTTPURLResponse else {
@@ -154,20 +164,70 @@ struct HTTPClient: Sendable {
             elapsed: elapsed,
             finalURL: http.url ?? url,
             timings: delegate.timings,
-            requestHeaders: delegate.sentHeaders ?? request.allHTTPHeaderFields.map { $0.map { ($0.key, $0.value) } } ?? []
+            requestHeaders: delegate.sentHeaders ?? request.allHTTPHeaderFields.map { $0.map { ($0.key, $0.value) } } ?? [],
+            events: delegate.events
         )
     }
 }
 
 /// Redirects, cookies across redirects, TLS and client-certificate
 /// challenges, proxy auth, and timing metrics for one request.
-private final class TransferDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+private final class TransferDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let followRedirects: Bool
     let network: NetworkOptions
     let explicitCookie: Bool
+    var onEvent: (@Sendable (SSEEvent) -> Void)?
     private let lock = NSLock()
     private var collected: [TimingPhase] = []
     private var headersSent: [(name: String, value: String)]?
+    private var received = Data()
+    private var response: URLResponse?
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var parser: SSEParser?
+    private var streamed: [SSEEvent] = []
+
+    var events: [SSEEvent] { lock.withLock { streamed } }
+
+    func start(_ task: URLSessionDataTask, continuation: CheckedContinuation<(Data, URLResponse), Error>) {
+        lock.withLock { self.continuation = continuation }
+        task.resume()
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        let isStream = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?.lowercased().contains("text/event-stream") == true
+        lock.withLock {
+            self.response = response
+            if isStream { parser = SSEParser() }
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        var newEvents: [SSEEvent] = []
+        lock.withLock {
+            received.append(data)
+            if parser != nil {
+                newEvents = parser!.feed(data)
+                streamed += newEvents
+            }
+        }
+        if let onEvent { newEvents.forEach(onEvent) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let (pending, data, response) = lock.withLock {
+            let pending = continuation
+            continuation = nil
+            return (pending, received, self.response)
+        }
+        if let error {
+            pending?.resume(throwing: error)
+        } else if let response {
+            pending?.resume(returning: (data, response))
+        } else {
+            pending?.resume(throwing: URLError(.badServerResponse))
+        }
+    }
 
     init(followRedirects: Bool, network: NetworkOptions, explicitCookie: Bool) {
         self.followRedirects = followRedirects

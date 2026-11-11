@@ -103,7 +103,7 @@ struct RequestExecutor {
         }
     }
 
-    func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String]) async throws -> ExecutionOutcome {
+    func execute(_ snapshot: OCRequestSnapshot, at path: NodePath?, session: [String: String], onEvent: (@Sendable (SSEEvent) -> Void)? = nil) async throws -> ExecutionOutcome {
         var session = session
         var snapshot = snapshot
         var scriptLogs: [ScriptLog] = []
@@ -165,7 +165,8 @@ struct RequestExecutor {
             method: effective.method,
             urlText: effective.url,
             body: encoded.data,
-            headers: headers
+            headers: headers,
+            onEvent: onEvent
         )
         try Task.checkCancellation()
 

@@ -6,7 +6,21 @@ struct ResponseArea: View {
 
     var body: some View {
         Group {
-            if app.busy {
+            if app.busy, !app.liveEvents.isEmpty {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Streaming — \(app.liveEvents.count) events")
+                            .font(.callout.weight(.medium))
+                        Spacer()
+                        Button("Stop") { app.cancelSend() }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    Divider()
+                    EventsView(events: app.liveEvents, followTail: true)
+                }
+            } else if app.busy {
                 VStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
@@ -26,6 +40,10 @@ struct ResponseArea: View {
                         Divider()
                         ConsoleView(logs: app.lastLogs)
                             .frame(maxHeight: 180)
+                    }
+                    if !app.liveEvents.isEmpty {
+                        Divider()
+                        EventsView(events: app.liveEvents, followTail: false)
                     }
                 }
             } else if let result = app.result, let display = app.bodyDisplay {
@@ -235,6 +253,7 @@ struct ResponseView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
         case headers = "Headers"
+        case events = "Events"
         case cookies = "Cookies"
         case console = "Console"
         var id: String { rawValue }
@@ -248,7 +267,7 @@ struct ResponseView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 TabStrip(
-                    tabs: Tab.allCases,
+                    tabs: Tab.allCases.filter { $0 != .events || !result.events.isEmpty },
                     selection: $tab,
                     title: { $0.rawValue },
                     badge: { tab in
@@ -256,6 +275,7 @@ struct ResponseView: View {
                         case .headers: result.headers.count
                         case .console: app.lastLogs.count
                         case .cookies: responseCookies.count
+                        case .events: result.events.count
                         case .body: 0
                         }
                     }
@@ -396,12 +416,15 @@ struct ResponseView: View {
                 ConsoleView(logs: app.lastLogs)
             case .cookies:
                 cookiesList
+            case .events:
+                EventsView(events: result.events, followTail: false)
             }
         }
     }
 
     /// Images and PDFs open in Preview; a mode the new response lacks falls back to Text.
     private func settleMode() {
+        if !result.events.isEmpty, tab == .body { tab = .events }
         let kind = ResponsePreview.kind(for: result)
         if kind == .image || kind == .pdf {
             mode = .preview
@@ -656,6 +679,45 @@ struct ConsoleView: View {
         case "error": .red
         case "warn": .orange
         default: .secondary
+        }
+    }
+}
+
+/// Server-sent events as a list: time, event name, and data (pretty JSON when it parses).
+struct EventsView: View {
+    let events: [SSEEvent]
+    let followTail: Bool
+
+    var body: some View {
+        if events.isEmpty {
+            ContentUnavailableView("No events", systemImage: "dot.radiowaves.left.and.right", description: Text("The stream sent no events."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                List(events) { event in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(event.receivedAt.formatted(.dateTime.hour().minute().second().secondFraction(.fractional(3))))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                            Text(event.event)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.blue)
+                            if let id = event.eventID {
+                                Text("id \(id)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(JSONHighlighter.prettyPrint(event.data) ?? event.data)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    .id(event.id)
+                }
+                .listStyle(.plain)
+                .onChange(of: events.count) {
+                    if followTail, let last = events.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
         }
     }
 }

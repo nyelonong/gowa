@@ -109,6 +109,8 @@ final class AppState {
     var lastCaptures: [(name: String, value: String, stored: Bool)] = []
     var lastAssertions: [OpenCollectionDocument.AssertionOutcome] = []
     var lastTests: [ScriptTestResult] = []
+    /// Server-sent events arriving while a streamed response is still open.
+    var liveEvents: [SSEEvent] = []
     var lastLogs: [ScriptLog] = []
     var lastScriptError: String?
 
@@ -783,6 +785,7 @@ final class AppState {
         result = nil
         bodyDisplay = nil
         errorText = nil
+        liveEvents = []
         lastAssertions = []
         lastTests = []
         lastLogs = []
@@ -796,7 +799,12 @@ final class AppState {
             guard let self else { return }
             guard self.sendRequestID == requestID else { return }
             do {
-                let outcome = try await executor.execute(snapshot, at: path, session: self.sessionVariables)
+                let outcome = try await executor.execute(snapshot, at: path, session: self.sessionVariables) { event in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.sendRequestID == requestID else { return }
+                        self.liveEvents.append(event)
+                    }
+                }
                 try Task.checkCancellation()
                 guard self.sendRequestID == requestID else { return }
                 let response = outcome.response
