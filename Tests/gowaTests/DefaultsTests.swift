@@ -69,3 +69,26 @@ func folderNoneAuthStopsInheritance() {
     doc.updateDefaults(at: [0], defaults)
     #expect(doc.resolvedAuth(at: [0, 0]) == OAuthKind.none)
 }
+
+@Test("bulk edit text round-trips rows, keeps colons in values, and disables with //")
+func bulkEditRoundTrip() {
+    let rows = [
+        KVRow(name: "Accept", value: "application/json", disabled: false),
+        KVRow(name: "X-Time", value: "12:30:00", disabled: true),
+    ]
+    let text = KVRow.bulkText(rows)
+    #expect(text == "Accept: application/json\n//X-Time: 12:30:00")
+    #expect(KVRow.parseBulk(text) == rows)
+    #expect(KVRow.parseBulk("\n flag \n// a:b\n") == [
+        KVRow(name: "flag", value: "", disabled: false),
+        KVRow(name: "a", value: "b", disabled: true),
+    ])
+}
+
+@Test("bulk replace keeps each param's location by name")
+func bulkReplaceKeepsParamKind() {
+    var params = [OCParam(name: "id", value: "1", kind: "path", disabled: false)]
+    params.apply(.replaceAll([KVRow(name: "id", value: "2", disabled: false), KVRow(name: "q", value: "x", disabled: false)]))
+    #expect(params.map(\.kind) == ["path", "query"])
+    #expect(params.map(\.value) == ["2", "x"])
+}
