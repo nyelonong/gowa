@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var app
+    @AppStorage("gowa.layout.sideBySide") private var sideBySide = false
 
     var body: some View {
         NavigationSplitView {
@@ -32,13 +33,23 @@ struct ContentView: View {
                     }
 
                     if app.draft != nil {
-                        VSplitView {
-                            RequestEditor(app: app)
-                                .id(app.selectedRequestPath)
-                                .frame(minHeight: 300)
-                            ResponseArea(app: app)
-                                .frame(minHeight: 180)
-                                .layoutPriority(1)
+                        if sideBySide {
+                            HSplitView {
+                                RequestEditor(app: app)
+                                    .id(app.selectedRequestPath)
+                                    .frame(minWidth: 460, maxWidth: .infinity)
+                                ResponseArea(app: app)
+                                    .frame(minWidth: 360, maxWidth: .infinity)
+                            }
+                        } else {
+                            VSplitView {
+                                RequestEditor(app: app)
+                                    .id(app.selectedRequestPath)
+                                    .frame(minHeight: 300)
+                                ResponseArea(app: app)
+                                    .frame(minHeight: 180)
+                                    .layoutPriority(1)
+                            }
                         }
                     } else {
                         RequestEditor(app: app)
@@ -80,6 +91,17 @@ struct ContentView: View {
             if app.document != nil {
                 ToolbarItemGroup(placement: .primaryAction) {
                     environmentMenu
+
+                    Button {
+                        sideBySide.toggle()
+                    } label: {
+                        Label(
+                            sideBySide ? "Response Below" : "Response Beside",
+                            systemImage: sideBySide ? "rectangle.split.1x2" : "rectangle.split.2x1"
+                        )
+                    }
+                    .help(sideBySide ? "Show the response below the request (⌥⌘L)" : "Show the response beside the request (⌥⌘L)")
+                    .keyboardShortcut("l", modifiers: [.command, .option])
 
                     Button {
                         app.startRunner(under: nil)

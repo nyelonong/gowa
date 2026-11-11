@@ -33,6 +33,13 @@ struct TabStrip<Tab: Hashable & Identifiable>: View {
     var badge: (Tab) -> Int = { _ in 0 }
 
     var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            strip
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var strip: some View {
         HStack(spacing: 2) {
             ForEach(tabs) { tab in
                 let selected = tab == selection
@@ -42,6 +49,8 @@ struct TabStrip<Tab: Hashable & Identifiable>: View {
                     HStack(spacing: 5) {
                         Text(title(tab))
                             .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                            .fixedSize()
                         if badge(tab) > 0 {
                             Text("\(badge(tab))")
                                 .font(.caption2.weight(.semibold).monospacedDigit())
