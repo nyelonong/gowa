@@ -71,15 +71,7 @@ private struct EditorContent: View {
                 .font(.title3.weight(.semibold))
                 .textFieldStyle(.plain)
                 .accessibilityLabel("Request name")
-                .onAppear {
-                    // AppKit focuses the first text field with its text selected,
-                    // so one stray key would rename the request.
-                    DispatchQueue.main.async {
-                        if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
-                            window.makeFirstResponder(nil)
-                        }
-                    }
-                }
+                .background(InitialFocusClearer())
 
                 HStack(spacing: 8) {
                     urlBar
@@ -743,5 +735,28 @@ struct SettingsSection: View {
             return
         }
         update { snapshot in snapshot.settings.timeout = value }
+    }
+}
+
+/// AppKit focuses a window's first text field with its text selected, so one
+/// stray key would rename the request. This clears that automatic focus once
+/// the editor is in a window, including windows that aren't key yet.
+private struct InitialFocusClearer: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { ClearingView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class ClearingView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            for delay in [0.0, 0.15, 0.4] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                    guard let window, let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
+                          editor.selectedRange().length > 0, editor.selectedRange().length == (editor.string as NSString).length
+                    else { return }
+                    window.makeFirstResponder(nil)
+                }
+            }
+        }
     }
 }
