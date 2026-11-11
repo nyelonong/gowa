@@ -608,8 +608,7 @@ enum ProtoWire {
         }
 
         mutating func lengthDelimited() throws -> [UInt8] {
-            let length = Int(try varint())
-            guard length >= 0, offset + length <= bytes.count else { throw ProtoError.truncated }
+            guard let length = Int(exactly: try varint()), length <= bytes.count - offset else { throw ProtoError.truncated }
             defer { offset += length }
             return Array(bytes[offset..<offset + length])
         }

@@ -101,10 +101,13 @@ final class GrpcSession {
     var liveResponses: [String] = []
     var error: String?
     var task: Task<Void, Never>?
+    /// Identifies the current load or call; results from older runs are ignored.
+    var runID: UUID?
 
     func reset() {
         task?.cancel()
         task = nil
+        runID = nil
         schema = nil
         schemaSource = ""
         loadingSchema = false

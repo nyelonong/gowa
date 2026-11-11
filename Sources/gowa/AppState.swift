@@ -487,40 +487,51 @@ final class AppState {
         if let certificate = settings.clientCertificates.first(where: { !$0.disabled && !$0.path.isEmpty && NetworkOptions.domain($0.domain, matches: target.host, port: target.port) }) {
             security.clientCertificate = try GrpcCertificates.load(certificate, variables: prepared.variables, base: document?.url?.deletingLastPathComponent())
         }
-        return (target, effective.headers, security, OpenCollectionDocument.interpolate(snapshot.message, prepared.variables), prepared.variables)
+        // HTTP-only headers (often inherited from REST defaults) are reserved in gRPC.
+        let reserved: Set<String> = ["content-type", "content-length", "te", "user-agent", "host", "connection", "accept", "accept-encoding", "transfer-encoding"]
+        let metadata = effective.headers.filter { !reserved.contains($0.name.lowercased()) && !$0.name.lowercased().hasPrefix("grpc-") }
+        return (target, metadata, security, OpenCollectionDocument.interpolate(snapshot.message, prepared.variables), prepared.variables)
     }
 
     func loadGrpcSchema() {
         grpc.task?.cancel()
         grpc.error = nil
+        let run = UUID()
+        grpc.runID = run
         grpc.task = Task { @MainActor in
             do {
-                try await fetchGrpcSchema()
-            } catch is CancellationError {
+                try await fetchGrpcSchema(run: run)
             } catch {
+                guard grpc.runID == run, !(error is CancellationError) else { return }
                 grpc.error = error.localizedDescription
             }
         }
     }
 
     /// Loads methods from the descriptor file, or by server reflection, and
-    /// picks the first method when none is chosen yet.
-    private func fetchGrpcSchema() async throws {
+    /// picks the first method when none is chosen yet. Results of a run that
+    /// was replaced (another call, another request) are dropped.
+    private func fetchGrpcSchema(run: UUID) async throws {
         guard let snapshot = grpcDraft else { return }
         grpc.loadingSchema = true
-        defer { grpc.loadingSchema = false }
+        defer { if grpc.runID == run { grpc.loadingSchema = false } }
         let context = try await grpcContext()
+        let schema: ProtoSchema
+        let source: String
         if !snapshot.protoFilePath.isEmpty {
             let base = document?.url?.deletingLastPathComponent()
             let file = EffectiveBody.resolvePath(OpenCollectionDocument.interpolate(snapshot.protoFilePath, context.variables), base: base)
-            grpc.schema = try await Task.detached { try GrpcClient.loadDescriptors(at: file, importPaths: []) }.value
-            grpc.schemaSource = file.lastPathComponent
+            schema = try await Task.detached { try GrpcClient.loadDescriptors(at: file, importPaths: []) }.value
+            source = file.lastPathComponent
         } else {
-            grpc.schema = try await GrpcClient.reflect(target: context.target, security: context.security, metadata: context.metadata)
-            grpc.schemaSource = "server reflection"
+            schema = try await GrpcClient.reflect(target: context.target, security: context.security, metadata: context.metadata)
+            source = "server reflection"
         }
         try Task.checkCancellation()
-        if let schema = grpc.schema, var current = grpcDraft,
+        guard grpc.runID == run else { throw CancellationError() }
+        grpc.schema = schema
+        grpc.schemaSource = source
+        if var current = grpcDraft,
            current.method.isEmpty || schema.method(current.method) == nil, let first = schema.methods.first {
             current.method = first.fullName
             current.methodType = first.kind
@@ -532,29 +543,35 @@ final class AppState {
     }
 
     func invokeGrpc() {
+        grpc.task?.cancel()
+        let run = UUID()
+        grpc.runID = run
         grpc.calling = true
         grpc.error = nil
         grpc.result = nil
         grpc.liveResponses = []
-        grpc.task?.cancel()
         grpc.task = Task { @MainActor in
-            defer { grpc.calling = false }
+            defer { if grpc.runID == run { grpc.calling = false } }
             do {
-                if grpc.schema == nil { try await fetchGrpcSchema() }
+                if grpc.schema == nil { try await fetchGrpcSchema(run: run) }
                 guard let snapshot = grpcDraft, let schema = grpc.schema else { throw GrpcError.reflection("no schema") }
                 guard let method = schema.method(snapshot.method) else { throw GrpcError.noMethod(snapshot.method) }
                 let context = try await grpcContext()
                 let encoded = try GrpcClient.encode(context.message, method: method, schema: schema)
-                grpc.result = try await GrpcClient.invoke(
+                let result = try await GrpcClient.invoke(
                     target: context.target, security: context.security, method: method, schema: schema,
                     encoded: encoded, metadata: context.metadata, timeout: .seconds(60)
                 ) { text in
-                    Task { @MainActor [weak self] in self?.grpc.liveResponses.append(text) }
+                    Task { @MainActor [weak self] in
+                        guard let self, self.grpc.runID == run else { return }
+                        self.grpc.liveResponses.append(text)
+                    }
                 }
-            } catch is CancellationError {
-                grpc.error = "Call cancelled"
+                guard grpc.runID == run else { return }
+                grpc.result = result
             } catch {
-                grpc.error = error.localizedDescription
+                guard grpc.runID == run else { return }
+                grpc.error = error is CancellationError ? "Call cancelled" : error.localizedDescription
             }
         }
     }
@@ -1050,21 +1067,44 @@ final class AppState {
 
     private func recordHistory(snapshot: OCRequestSnapshot, path: NodePath?, effective: EffectiveRequest, response: HTTPResult?, error: String?) {
         let sent = response?.requestHeaders.isEmpty == false ? response!.requestHeaders : effective.headers
+        let redaction = historyRedaction(for: snapshot)
         history.record(HistoryEntry(
             method: effective.method,
-            url: effective.url,
-            body: effective.body,
+            url: redaction.url(effective.url),
+            body: redaction.text(effective.body),
             at: Date(),
             status: response?.status,
             requestName: snapshot.name,
             collectionID: document?.documentID,
             nodeID: path?.map(String.init).joined(separator: "."),
-            requestHeaders: sent.map { .init(name: $0.name, value: $0.value) },
+            requestHeaders: sent.map { redaction.header($0.name, $0.value) },
             responseHeaders: response?.headers.map { .init(name: $0.name, value: $0.value) },
             responseBody: response.map { String(decoding: $0.body.prefix(HistoryStore.maxBodyBytes + 1), as: UTF8.self) },
             elapsedMs: response?.elapsed.milliseconds,
             error: error
         ))
+    }
+
+    /// What history must not store for this request: the auth header or query
+    /// parameter it uses, and the values of secret variables wherever they appear.
+    private func historyRedaction(for snapshot: OCRequestSnapshot) -> HistoryRedaction {
+        var headers: Set<String> = []
+        var queries: Set<String> = []
+        var auth = snapshot.authKind
+        if case .inherit = auth, let doc = document, let path = selectedRequestPath { auth = doc.resolvedAuth(at: path) ?? .none }
+        switch auth {
+        case .apiKey(let key, _, let placement):
+            if placement == "query" { queries.insert(key) } else { headers.insert(key.lowercased()) }
+        case .oauth2(let config):
+            if config.tokenQuery.isEmpty { headers.insert((config.tokenHeader.isEmpty ? "Authorization" : config.tokenHeader).lowercased()) } else { queries.insert(config.tokenQuery) }
+        default: break
+        }
+        var secrets: [String] = []
+        if let doc = document, let environment = environments.first(where: { $0.name == activeEnvironment }) {
+            let values = doc.resolveVariables(in: activeEnvironment).values
+            secrets = environment.variables.filter(\.secret).compactMap { values[$0.name] }.filter { $0.count >= 4 }
+        }
+        return HistoryRedaction(headers: headers, queries: queries, secrets: secrets)
     }
 
     /// Adds a history entry back to the collection as a new request.
@@ -1148,6 +1188,11 @@ final class AppState {
         guard let index = envs.firstIndex(where: { $0.name == envName }) else { return }
         var variables = envs[index].variables
         if let position = variables.firstIndex(where: { $0.name == name }) {
+            if variables[position].secret {
+                // Secret values live in the Keychain, never in the collection file.
+                Keychain.setValue(value, account: doc.secretAccount(env: envName, variable: name))
+                return
+            }
             variables[position].value = value
         } else {
             variables.append(OCVariable(name: name, value: value, secret: false, disabled: false))
@@ -1519,3 +1564,24 @@ final class AppState {
 }
 
 
+
+struct HistoryRedaction {
+    var headers: Set<String>
+    var queries: Set<String>
+    var secrets: [String]
+    static let mask = "•••• (not saved)"
+
+    func text(_ value: String) -> String {
+        secrets.reduce(value) { $0.replacingOccurrences(of: $1, with: "••••") }
+    }
+
+    func header(_ name: String, _ value: String) -> HistoryEntry.Header {
+        headers.contains(name.lowercased()) ? .init(name: name, value: Self.mask) : .init(name: name, value: text(value))
+    }
+
+    func url(_ value: String) -> String {
+        guard !queries.isEmpty, var components = URLComponents(string: value) else { return text(value) }
+        components.queryItems = components.queryItems?.map { queries.contains($0.name) ? URLQueryItem(name: $0.name, value: "redacted") : $0 }
+        return text(components.string ?? value)
+    }
+}

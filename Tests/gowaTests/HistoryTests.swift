@@ -32,3 +32,12 @@ func historyLegacyDecode() throws {
     #expect(decoded.first?.requestName == nil)
     #expect(decoded.first?.status == 200)
 }
+
+@Test("history redaction hides auth headers, auth query params, and secret values")
+func historyRedaction() {
+    let redaction = HistoryRedaction(headers: ["x-goog-api-key"], queries: ["key"], secrets: ["s3cr3t-value"])
+    #expect(redaction.url("https://x.test/a?key=abc&q=s3cr3t-value") == "https://x.test/a?key=redacted&q=••••")
+    #expect(redaction.header("X-Goog-Api-Key", "abc").value == HistoryRedaction.mask)
+    #expect(redaction.header("X-Other", "Bearer s3cr3t-value").value == "Bearer ••••")
+    #expect(redaction.text(#"{"pw":"s3cr3t-value"}"#) == #"{"pw":"••••"}"#)
+}

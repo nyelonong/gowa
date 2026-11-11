@@ -164,3 +164,13 @@ func grpcItemRoundTrip() {
     #expect(doc.grpcSnapshot(at: [0]) == snapshot)
     #expect(doc.enumerate()[0].kind == "grpc")
 }
+
+@Test("huge or overflowing lengths are rejected, not trapped on")
+func protoHugeLength() {
+    var reader = ProtoWire.Reader(bytes: [0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01])
+    _ = try? reader.nextTag()
+    #expect(throws: ProtoError.truncated) { try reader.lengthDelimited() }
+    var near = ProtoWire.Reader(bytes: [0x0A, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])
+    _ = try? near.nextTag()
+    #expect(throws: ProtoError.truncated) { try near.lengthDelimited() }
+}

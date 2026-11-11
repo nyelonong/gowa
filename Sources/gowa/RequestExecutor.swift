@@ -125,6 +125,8 @@ struct RequestExecutor {
             if let error = outcome.error {
                 throw ExecutionError.script(error, logs: scriptLogs)
             }
+            // The script saw the inherited headers; keep them (or its edits of them).
+            snapshot.headers = initial.snapshot.headers
             if let changed = outcome.request, changed != request {
                 snapshot.method = changed.method
                 snapshot.url = changed.url

@@ -47,3 +47,22 @@ func generatedMultipart() {
     #expect(CodeGenerator.generate(request, language: .javascript).contains("form.append(\"note\", \"hi\");"))
     #expect(CodeGenerator.generate(request, language: .httpie).contains("'doc@/tmp/a.txt'"))
 }
+
+@Test("Swift literals use \\u{…} escapes and multipart names are escaped")
+func swiftLiteralEscapes() {
+    #expect(CodeGenerator.swiftQuoted("a\"b\\c\n\u{1}") == #""a\"b\\c\n\u{1}""#)
+    let request = AppState.EffectiveRequest(
+        method: "POST", url: "https://x.test", headers: [],
+        payload: .multipart([MultipartPart(name: "we\"ird", text: "v", file: nil, contentType: "")]),
+        followRedirects: true, timeout: nil
+    )
+    #expect(CodeGenerator.generate(request, language: .swift).contains(#"name=\"we\"ird\""#))
+}
+
+@Test("CRLF bodies keep their carriage returns in Go and Swift")
+func crlfBodies() {
+    let request = AppState.EffectiveRequest(method: "POST", url: "https://x.test", headers: [],
+        payload: .text("a\r\nb", contentType: "text/plain"), followRedirects: true, timeout: nil)
+    #expect(CodeGenerator.generate(request, language: .go).contains(#"strings.NewReader("a\r\nb")"#))
+    #expect(CodeGenerator.generate(request, language: .swift).contains(#"Data("a\r\nb".utf8)"#))
+}

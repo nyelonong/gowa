@@ -25,6 +25,23 @@ enum CodeGenerator {
     }
 
     /// Double-quoted literal with backslash escapes (JS, Python, Go, Swift).
+    /// Swift literal: like `quoted` but with Swift's `\u{…}` escape.
+    static func swiftQuoted(_ text: String) -> String {
+        var out = "\""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case let s where s.value < 0x20: out += "\\u{\(String(s.value, radix: 16))}"
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out + "\""
+    }
+
     static func quoted(_ text: String) -> String {
         var out = "\""
         for scalar in text.unicodeScalars {
@@ -244,24 +261,24 @@ enum CodeGenerator {
 
     /// Go raw string when possible (no backticks), else an escaped literal.
     private static func goRaw(_ text: String) -> String {
-        text.contains("`") ? quoted(text) : "`" + text + "`"
+        text.contains("`") || text.unicodeScalars.contains("\r") ? quoted(text) : "`" + text + "`"
     }
 
     // MARK: Swift
 
     private static func swift(_ request: AppState.EffectiveRequest) -> String {
         var lines = ["import Foundation", ""]
-        lines.append("var request = URLRequest(url: URL(string: \(quoted(request.url)))!)")
-        lines.append("request.httpMethod = \(quoted(request.method))")
+        lines.append("var request = URLRequest(url: URL(string: \(swiftQuoted(request.url)))!)")
+        lines.append("request.httpMethod = \(swiftQuoted(request.method))")
         for (name, value) in headers(request, contentType: defaultContentType(request.payload)) {
-            lines.append("request.setValue(\(quoted(value)), forHTTPHeaderField: \(quoted(name)))")
+            lines.append("request.setValue(\(swiftQuoted(value)), forHTTPHeaderField: \(swiftQuoted(name)))")
         }
         switch request.payload {
         case .none: break
         case .text(let text, _):
             lines.append("request.httpBody = Data(\(swiftMultiline(text)).utf8)")
         case .form(let pairs):
-            lines.append("request.httpBody = Data(\(quoted(EffectiveBody.urlEncoded(pairs))).utf8)")
+            lines.append("request.httpBody = Data(\(swiftQuoted(EffectiveBody.urlEncoded(pairs))).utf8)")
         case .multipart(let fields):
             lines.append("let boundary = UUID().uuidString")
             lines.append("request.setValue(\"multipart/form-data; boundary=\\(boundary)\", forHTTPHeaderField: \"Content-Type\")")
@@ -269,18 +286,18 @@ enum CodeGenerator {
             for field in fields {
                 lines.append("body.append(Data(\"--\\(boundary)\\r\\n\".utf8))")
                 if let file = field.file {
-                    lines.append("body.append(Data(\"Content-Disposition: form-data; name=\\\"\(field.name)\\\"; filename=\\\"\(file.lastPathComponent)\\\"\\r\\n\\r\\n\".utf8))")
-                    lines.append("body.append(try Data(contentsOf: URL(fileURLWithPath: \(quoted(file.path)))))")
+                    lines.append("body.append(Data(" + swiftQuoted("Content-Disposition: form-data; name=\"\(field.name)\"; filename=\"\(file.lastPathComponent)\"\r\n\r\n") + ".utf8))")
+                    lines.append("body.append(try Data(contentsOf: URL(fileURLWithPath: \(swiftQuoted(file.path)))))")
                 } else {
-                    lines.append("body.append(Data(\"Content-Disposition: form-data; name=\\\"\(field.name)\\\"\\r\\n\\r\\n\".utf8))")
-                    lines.append("body.append(Data(\(quoted(field.text ?? "")).utf8))")
+                    lines.append("body.append(Data(" + swiftQuoted("Content-Disposition: form-data; name=\"\(field.name)\"\r\n\r\n") + ".utf8))")
+                    lines.append("body.append(Data(\(swiftQuoted(field.text ?? "")).utf8))")
                 }
                 lines.append("body.append(Data(\"\\r\\n\".utf8))")
             }
             lines.append("body.append(Data(\"--\\(boundary)--\\r\\n\".utf8))")
             lines.append("request.httpBody = body")
         case .file(let url, _):
-            lines.append("request.httpBody = try Data(contentsOf: URL(fileURLWithPath: \(quoted(url.path))))")
+            lines.append("request.httpBody = try Data(contentsOf: URL(fileURLWithPath: \(swiftQuoted(url.path))))")
         }
         if let timeout = request.timeout, timeout > 0 {
             lines.append("request.timeoutInterval = \(String(format: "%g", Double(timeout) / 1000))")
@@ -292,7 +309,7 @@ enum CodeGenerator {
     }
 
     private static func swiftMultiline(_ text: String) -> String {
-        guard text.contains("\n"), !text.contains("\"\"\"") else { return quoted(text) }
+        guard text.contains("\n"), !text.contains("\"\"\""), !text.unicodeScalars.contains("\r"), !text.unicodeScalars.contains(where: { $0.value < 0x20 && $0 != "\n" && $0 != "\t" }) else { return swiftQuoted(text) }
         let escaped = text.replacingOccurrences(of: "\\", with: "\\\\")
         return "\"\"\"\n" + escaped + "\n\"\"\""
     }

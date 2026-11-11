@@ -1186,19 +1186,22 @@ final class OpenCollectionDocument {
         return scripts.filter { $0.type == type }
     }
 
-    /// Merge folder/collection default headers (outermost first) under the
-    /// request's own headers, which win on name conflicts.
+    /// Merge folder/collection default headers under the request's own;
+    /// inner levels win over outer ones and the request wins over all.
     func resolvedHeaders(at path: NodePath, requestHeaders: [OCHeader]) -> [OCHeader] {
         var merged: [OCHeader] = []
         for defaults in defaultChain(for: path) {
             guard let headers = defaults["headers"] as? [[String: Any]] else { continue }
             for header in headers {
                 let name = header["name"] as? String ?? ""
-                guard !name.isEmpty,
-                      header["disabled"] as? Bool != true,
-                      !merged.contains(where: { $0.name.lowercased() == name.lowercased() })
-                else { continue }
-                merged.append(OCHeader(name: name, value: header["value"] as? String ?? "", disabled: false))
+                guard !name.isEmpty, header["disabled"] as? Bool != true else { continue }
+                let entry = OCHeader(name: name, value: header["value"] as? String ?? "", disabled: false)
+                // The chain runs outermost first, so an inner folder overrides the collection.
+                if let position = merged.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+                    merged[position] = entry
+                } else {
+                    merged.append(entry)
+                }
             }
         }
         for header in requestHeaders {

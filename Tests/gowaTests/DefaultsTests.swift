@@ -117,3 +117,16 @@ func environmentsKeepUnknownKeys() {
     #expect((variable["value"] as? [String: Any])?["data"] as? String == "b")
     #expect(Theme.color(hex: "#30A46C") != nil && Theme.color(hex: "blue") == nil)
 }
+
+@MainActor
+@Test("an inner folder's header overrides the collection's")
+func innerFolderHeaderWins() {
+    let doc = folderDocument()
+    var collection = doc.defaults(at: nil)
+    collection.headers = [OCHeader(name: "X-Team", value: "outer", disabled: false)]
+    doc.updateDefaults(at: nil, collection)
+    var folder = doc.defaults(at: [0])
+    folder.headers = [OCHeader(name: "x-team", value: "inner", disabled: false)]
+    doc.updateDefaults(at: [0], folder)
+    #expect(doc.resolvedHeaders(at: [0, 0], requestHeaders: []).map(\.value) == ["inner"])
+}

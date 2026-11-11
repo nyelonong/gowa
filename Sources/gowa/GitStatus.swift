@@ -70,7 +70,10 @@ struct GitStatus: Equatable, Sendable {
         await withCheckedContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", directory.path] + arguments
+            // A downloaded repository's .git/config could name a command to run;
+            // disable the settings that execute programs during status.
+            process.arguments = ["-C", directory.path, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+                                 "-c", "core.untrackedCache=false"] + arguments
             process.environment = ProcessInfo.processInfo.environment.merging(["GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"]) { _, new in new }
             let pipe = Pipe()
             process.standardOutput = pipe

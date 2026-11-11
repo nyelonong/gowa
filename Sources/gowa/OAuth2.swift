@@ -431,20 +431,38 @@ enum BrowserCallback {
         } else {
             throw OAuth2Error.callbackUnsupported(callbackURL)
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: authorizationURL, callback: target) { url, error in
-                if let url {
-                    continuation.resume(returning: url)
-                } else if let error = error as? ASWebAuthenticationSessionError, error.code == .canceledLogin {
-                    continuation.resume(throwing: OAuth2Error.cancelled)
-                } else {
-                    continuation.resume(throwing: error ?? OAuth2Error.cancelled)
+        let box = ResumeOnce<URL>()
+        let holder = SessionHolder()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                box.continuation = continuation
+                let session = ASWebAuthenticationSession(url: authorizationURL, callback: target) { url, error in
+                    holder.session = nil
+                    if let url {
+                        box.resume(.success(url))
+                    } else if let error = error as? ASWebAuthenticationSessionError, error.code == .canceledLogin {
+                        box.resume(.failure(OAuth2Error.cancelled))
+                    } else {
+                        box.resume(.failure(error ?? OAuth2Error.cancelled))
+                    }
+                }
+                session.presentationContextProvider = PresentationAnchor.shared
+                session.prefersEphemeralWebBrowserSession = false
+                // The session must stay referenced until it completes.
+                holder.session = session
+                if !session.start() {
+                    holder.session = nil
+                    box.resume(.failure(OAuth2Error.callbackUnsupported(callbackURL)))
                 }
             }
-            session.presentationContextProvider = PresentationAnchor.shared
-            session.prefersEphemeralWebBrowserSession = false
-            session.start()
+        } onCancel: {
+            Task { @MainActor in holder.session?.cancel() }
+            box.resume(.failure(OAuth2Error.cancelled))
         }
+    }
+
+    private final class SessionHolder: @unchecked Sendable {
+        var session: ASWebAuthenticationSession?
     }
 
     private final class PresentationAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
