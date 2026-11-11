@@ -83,21 +83,6 @@ private struct EditorContent: View {
                         .foregroundStyle(.orange)
                 }
 
-                if !variableSuggestions.isEmpty {
-                    HStack(spacing: 6) {
-                        Text("Complete")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(variableSuggestions) { variable in
-                            Button("{{\(variable.name)}}") {
-                                completeVariable(variable)
-                            }
-                            .font(.system(.caption, design: .monospaced))
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -148,16 +133,16 @@ private struct EditorContent: View {
             Divider()
                 .frame(height: 16)
 
-            TextField(
-                "https://example.com/path",
+            VariableField(
+                "https://example.com/path — or paste a cURL command",
                 text: Binding(
                     get: { draft.url },
                     set: { newValue in commit { snapshot in snapshot.url = newValue } }
-                )
+                ),
+                variables: app.variableScope,
+                fontSize: 13,
+                onSubmit: { app.send() }
             )
-            .font(.system(.body, design: .monospaced))
-            .textFieldStyle(.plain)
-            .onSubmit { app.send() }
             .accessibilityLabel("Request URL")
 
             if !activeVariables.isEmpty {
@@ -244,28 +229,7 @@ private struct EditorContent: View {
     // MARK: variable quick-add
 
     private var activeVariables: [OCVariable] {
-        app.environments
-            .first(where: { $0.name == app.activeEnvironment })?
-            .variables
-            .filter { !$0.disabled && !$0.name.isEmpty } ?? []
-    }
-
-    private var trailingVariablePartial: String? {
-        guard let match = draft.url.range(of: #"\{\{([A-Za-z0-9_]*)$"#, options: .regularExpression) else { return nil }
-        return String(draft.url[match.lowerBound...])
-    }
-
-    private var variableSuggestions: [OCVariable] {
-        guard let partial = trailingVariablePartial else { return [] }
-        let typed = partial.dropFirst(2).lowercased()
-        return activeVariables.filter { $0.name.lowercased().hasPrefix(typed) }
-    }
-
-    private func completeVariable(_ variable: OCVariable) {
-        guard let match = draft.url.range(of: #"\{\{([A-Za-z0-9_]*)$"#, options: .regularExpression) else { return }
-        var newURL = draft.url
-        newURL.replaceSubrange(match, with: "{{\(variable.name)}}")
-        commit { $0.url = newURL }
+        app.variableScope.values.keys.sorted().map { OCVariable(name: $0, value: "", secret: false, disabled: false) }
     }
 
     private func insertVariableAtCursor(_ variable: OCVariable) {
@@ -431,7 +395,7 @@ struct BodySection: View {
     }
 
     private func editor(_ text: Binding<String>, json: Bool) -> some View {
-        CodeEditor(text: text, highlightsJSON: json)
+        CodeEditor(text: text, highlightsJSON: json, variables: app.variableScope)
             .background(Theme.fieldFill)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).strokeBorder(Theme.hairline))

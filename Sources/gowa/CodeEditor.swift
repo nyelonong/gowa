@@ -6,6 +6,7 @@ import SwiftUI
 struct CodeEditor: NSViewRepresentable {
     @Binding var text: String
     var highlightsJSON: Bool
+    var variables: VariableScope? = nil
 
     private static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
@@ -13,6 +14,7 @@ struct CodeEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CodeEditor
         var highlightedAsJSON: Bool
+        var highlightedScope: VariableScope?
 
         init(parent: CodeEditor) {
             self.parent = parent
@@ -39,8 +41,24 @@ struct CodeEditor: NSViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: run.kind.color, range: run.range)
                 }
             }
+            if let scope = parent.variables {
+                for match in VariableScope.tokenPattern.matches(in: storage.string, range: full) {
+                    let token = (storage.string as NSString).substring(with: match.range(at: 1))
+                    let color: NSColor = switch scope.state(of: token) {
+                    case .defined: .systemGreen
+                    case .undefined: .systemRed
+                    case .function: .systemPurple
+                    }
+                    storage.addAttributes([
+                        .foregroundColor: color,
+                        .backgroundColor: color.withAlphaComponent(0.12),
+                        .toolTip: scope.tooltip(for: token),
+                    ], range: match.range)
+                }
+            }
             storage.endEditing()
             highlightedAsJSON = parent.highlightsJSON
+            highlightedScope = parent.variables
         }
     }
 
@@ -85,7 +103,7 @@ struct CodeEditor: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
             context.coordinator.highlight(textView)
-        } else if context.coordinator.highlightedAsJSON != highlightsJSON {
+        } else if context.coordinator.highlightedAsJSON != highlightsJSON || context.coordinator.highlightedScope != variables {
             context.coordinator.highlight(textView)
         }
     }
