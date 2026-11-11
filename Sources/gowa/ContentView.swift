@@ -74,6 +74,12 @@ struct ContentView: View {
             CurlImportSheet(app: app)
         }
         .sheet(isPresented: Binding(
+            get: { app.showingHistory },
+            set: { app.showingHistory = $0 }
+        )) {
+            HistorySheet(app: app)
+        }
+        .sheet(isPresented: Binding(
             get: { app.showingPalette },
             set: { app.showingPalette = $0 }
         )) {
@@ -112,6 +118,14 @@ struct ContentView: View {
                     }
                     .help(sideBySide ? "Show the response below the request (⌥⌘L)" : "Show the response beside the request (⌥⌘L)")
                     .keyboardShortcut("l", modifiers: [.command, .option])
+
+                    Button {
+                        app.showingHistory = true
+                    } label: {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                    }
+                    .help("History of sent requests (⌘Y)")
+                    .keyboardShortcut("y")
 
                     Button {
                         app.startRunner(under: nil)

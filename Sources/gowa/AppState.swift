@@ -783,7 +783,7 @@ final class AppState {
                 guard self.sendRequestID == requestID else { return }
                 let response = outcome.response
                 self.result = response
-                self.history.record(method: outcome.effective.method, url: outcome.effective.url, body: outcome.effective.body, status: response.status)
+                self.recordHistory(snapshot: snapshot, path: path, effective: outcome.effective, response: response, error: nil)
                 self.applyCaptures(outcome.captures)
                 self.applyScriptVariables(outcome)
                 self.lastTests = outcome.tests
@@ -811,7 +811,7 @@ final class AppState {
                 self.errorText = error.localizedDescription
                 if case ExecutionError.script(_, let logs) = error { self.lastLogs = logs }
                 if let effective = try? executor.prepare(snapshot, at: path, session: self.sessionVariables).effective {
-                    self.history.record(method: effective.method, url: effective.url, body: effective.body, status: nil)
+                    self.recordHistory(snapshot: snapshot, path: path, effective: effective, response: nil, error: error.localizedDescription)
                 }
             }
             guard self.sendRequestID == requestID else { return }
@@ -819,6 +819,56 @@ final class AppState {
             self.busy = false
             self.sendTask = nil
         }
+    }
+
+    private func recordHistory(snapshot: OCRequestSnapshot, path: NodePath?, effective: EffectiveRequest, response: HTTPResult?, error: String?) {
+        let sent = response?.requestHeaders.isEmpty == false ? response!.requestHeaders : effective.headers
+        history.record(HistoryEntry(
+            method: effective.method,
+            url: effective.url,
+            body: effective.body,
+            at: Date(),
+            status: response?.status,
+            requestName: snapshot.name,
+            collectionID: document?.documentID,
+            nodeID: path?.map(String.init).joined(separator: "."),
+            requestHeaders: sent.map { .init(name: $0.name, value: $0.value) },
+            responseHeaders: response?.headers.map { .init(name: $0.name, value: $0.value) },
+            responseBody: response.map { String(decoding: $0.body.prefix(HistoryStore.maxBodyBytes + 1), as: UTF8.self) },
+            elapsedMs: response?.elapsed.milliseconds,
+            error: error
+        ))
+    }
+
+    /// Adds a history entry back to the collection as a new request.
+    func restore(_ entry: HistoryEntry) {
+        guard document != nil else { return }
+        var snapshot = OCRequestSnapshot(
+            name: uniqueName(entry.requestName ?? "\(entry.method) request", among: siblingNames(under: nil)),
+            method: entry.method,
+            url: entry.url,
+            params: [],
+            headers: (entry.requestHeaders ?? [])
+                .filter { !$0.value.hasPrefix("••••") && !["content-length", "host"].contains($0.name.lowercased()) }
+                .map { OCHeader(name: $0.name, value: $0.value, disabled: false) },
+            bodyType: entry.body.isEmpty ? nil : (JSONHighlighter.isJSON(entry.body, contentType: nil) ? "json" : "text"),
+            bodyData: entry.body,
+            authKind: .none,
+            settings: OCSettings(followRedirects: nil, timeout: nil),
+            docs: nil
+        )
+        if !entry.method.requestHasBody { snapshot.bodyType = nil; snapshot.bodyData = "" }
+        addRequestFromCurl(snapshot, under: nil)
+        statusMessage = "Added \(snapshot.name) from history; credential headers weren't saved, so set auth again"
+    }
+
+    /// Selects the request a history entry came from, when it still exists.
+    func openSource(of entry: HistoryEntry) -> Bool {
+        guard entry.collectionID == document?.documentID, let id = entry.nodeID,
+              let node = document?.enumerate().first(where: { $0.id == id && !$0.isFolder })
+        else { return false }
+        select(path: node.path)
+        return true
     }
 
     func cancelSend() {
