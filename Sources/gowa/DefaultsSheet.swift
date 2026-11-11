@@ -72,17 +72,8 @@ struct DefaultsSheet: View {
                             change { $0.variables.apply(edit) }
                         }
                     case .docs:
-                        TextEditor(text: Binding(
-                            get: { defaults.docs ?? "" },
-                            set: { text in change { $0.docs = text } }
-                        ))
-                        .font(.system(.callout, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .frame(minHeight: 260)
-                        .background(Theme.fieldFill, in: RoundedRectangle(cornerRadius: Theme.cornerRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).strokeBorder(Theme.hairline))
-                        note("Markdown. Saved in the collection file.")
+                        DocsEditor(text: defaults.docs ?? "") { text in change { $0.docs = text } }
+                            .frame(minHeight: 320)
                     case .network:
                         NetworkSettingsView(app: app)
                     case .scripts:
