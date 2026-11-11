@@ -183,13 +183,15 @@ struct ResponseView: View {
     let result: HTTPResult
     let display: BodyDisplay
     @State private var tab: Tab = .body
-    @State private var prettyPrinted = false
+    @State private var prettyPrinted = true
+    @AppStorage("gowa.response.wrap") private var wraps = true
     @State private var showDiff = false
     @State private var showTimings = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case body = "Body"
         case headers = "Headers"
+        case cookies = "Cookies"
         case console = "Console"
         var id: String { rawValue }
     }
@@ -209,6 +211,7 @@ struct ResponseView: View {
                         switch tab {
                         case .headers: result.headers.count
                         case .console: app.lastLogs.count
+                        case .cookies: responseCookies.count
                         case .body: 0
                         }
                     }
@@ -259,6 +262,15 @@ struct ResponseView: View {
                     .help(prettyPrinted ? "Show raw body" : "Format JSON")
                     .accessibilityLabel("Format JSON")
                 }
+
+                Toggle(isOn: $wraps) {
+                    Image(systemName: "text.word.spacing")
+                        .frame(width: 22, height: 22)
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.borderless)
+                .help(wraps ? "Don't wrap long lines" : "Wrap long lines")
+                .accessibilityLabel("Wrap long lines")
 
                 if app.diffContext != nil {
                     Toggle(isOn: $showDiff) {
@@ -314,14 +326,38 @@ struct ResponseView: View {
                     CodeViewer(
                         text: shownText,
                         runs: display.runs(prettyPrinted: prettyPrinted),
-                        findTrigger: app.findTrigger
+                        findTrigger: app.findTrigger,
+                        isJSON: display.isJSON,
+                        wraps: wraps
                     )
                 }
             case .headers:
                 headersList
             case .console:
                 ConsoleView(logs: app.lastLogs)
+            case .cookies:
+                cookiesList
             }
+        }
+    }
+
+    /// Cookies this response set, parsed from its Set-Cookie headers.
+    private var responseCookies: [HTTPCookie] {
+        var fields: [String: String] = [:]
+        for header in result.headers { fields[header.name] = header.value }
+        return HTTPCookie.cookies(withResponseHeaderFields: fields, for: result.finalURL)
+    }
+
+    @ViewBuilder
+    private var cookiesList: some View {
+        if responseCookies.isEmpty {
+            ContentUnavailableView("No cookies set", systemImage: "birthday.cake", description: Text("This response had no Set-Cookie header."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(responseCookies, id: \.self) { cookie in
+                CookieRow(cookie: cookie)
+            }
+            .listStyle(.plain)
         }
     }
 
