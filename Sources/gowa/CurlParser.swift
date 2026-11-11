@@ -282,3 +282,19 @@ enum CurlParser {
             && text.split(separator: "&").allSatisfy { $0.contains("=") }
     }
 }
+
+extension OCRequestSnapshot {
+    /// Takes method, URL, params, headers, body, auth, and redirects from a
+    /// parsed cURL command; name, captures, checks, and scripts stay.
+    mutating func applyCurl(_ parsed: CurlParseResult) {
+        method = parsed.method
+        url = parsed.url
+        params = parsed.params
+        headers = parsed.headers
+        bodyType = parsed.bodyType
+        bodyData = parsed.bodyData
+        formFields = parsed.formFields
+        authKind = parsed.authKind
+        if let follow = parsed.followRedirects { settings.followRedirects = follow }
+    }
+}

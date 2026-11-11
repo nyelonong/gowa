@@ -96,3 +96,22 @@ func flags() throws {
     #expect(result.headers.contains { $0.name == "User-Agent" && $0.value == "GowaBot" })
     #expect(result.warnings.contains { $0.contains("--weird-flag") })
 }
+
+@Test("applying a pasted cURL keeps the request's name and automation")
+func applyCurlKeepsAutomation() throws {
+    var snapshot = OCRequestSnapshot(
+        name: "Mine", method: "GET", url: "https://old.test", params: [], headers: [],
+        bodyType: nil, bodyData: "", authKind: .none,
+        settings: OCSettings(followRedirects: nil, timeout: 5000), docs: nil
+    )
+    snapshot.assertions = [OCAssertion(expression: "res.status", op: "eq", value: "200", disabled: false)]
+    snapshot.applyCurl(try CurlParser.parse("curl -X PUT 'https://new.test/a?b=1' -H 'X: y' --json '{\"k\":1}'"))
+    #expect(snapshot.name == "Mine")
+    #expect(snapshot.method == "PUT")
+    #expect(snapshot.url == "https://new.test/a")
+    #expect(snapshot.params.map(\.name) == ["b"])
+    #expect(snapshot.headers.contains { $0.name == "X" })
+    #expect(snapshot.bodyType == "json")
+    #expect(snapshot.assertions.count == 1)
+    #expect(snapshot.settings.timeout == 5000)
+}

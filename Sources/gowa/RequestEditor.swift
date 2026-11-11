@@ -141,7 +141,8 @@ private struct EditorContent: View {
                 ),
                 variables: app.variableScope,
                 fontSize: 13,
-                onSubmit: { app.send() }
+                onSubmit: { app.send() },
+                onPaste: { text in importCurl(text) }
             )
             .accessibilityLabel("Request URL")
 
@@ -230,6 +231,20 @@ private struct EditorContent: View {
 
     private var activeVariables: [OCVariable] {
         app.variableScope.values.keys.sorted().map { OCVariable(name: $0, value: "", secret: false, disabled: false) }
+    }
+
+    /// Replaces the request with a pasted cURL command; other text pastes normally.
+    private func importCurl(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("curl "), let parsed = try? CurlParser.parse(trimmed) else { return false }
+        commit { snapshot in
+            snapshot.applyCurl(parsed)
+        }
+        app.statusMessage = parsed.warnings.isEmpty
+            ? "Filled the request from the pasted cURL command"
+            : "Filled from cURL. " + parsed.warnings.joined(separator: "; ")
+        if parsed.bodyType != nil { section = .body }
+        return true
     }
 
     private func insertVariableAtCursor(_ variable: OCVariable) {
