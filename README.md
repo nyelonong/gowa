@@ -26,27 +26,53 @@ swift build -c release && scripts/make-app.sh
 
 ## Features
 
-- **Collections in git** — every collection is a single, spec-conformant
-  OpenCollection YAML file. Open it, edit it, `git commit` it. Unknown spec
-  sections survive round-trips untouched.
-- **Nested folders** — organize requests in a tree inside the sidebar;
-  create, rename, duplicate, delete via context menu.
-- **Full request editor** — query/path params, headers with enable toggles,
-  body editor (JSON/text/XML/form-urlencoded) with pretty-print, request
-  settings (redirects, timeout).
-- **Auth** — Basic, Bearer, API Key (header or query), none, inherit. Other
-  spec auth types (OAuth2, AWS, digest…) are preserved exactly in the YAML.
-- **Environments & variables** — `{{name}}` placeholders interpolate into
-  URLs, params, headers, bodies, and auth from the active environment.
-- **Safe request execution** — environments are selected explicitly (Gowa
-  never silently chooses the first one), URLs validate before sending, request
-  timeouts are honored, and Stop cancels active sends and collection runs.
-- **Secrets stay out of git** — mark a variable as Secret and its value is
-  stored in the macOS Keychain; the collection file only ever contains the
-  variable name. (Tip: keep credentials in secret variables and reference
-  them as `{{token}}` in auth fields — never inline.)
-- JSON response highlighting, native TextKit viewer, timing/size readout,
-  request history (`⌘K` clears), `⌘↩` to send.
+**Requests**
+- **HTTP, GraphQL, WebSocket, and gRPC** — gRPC learns methods by server
+  reflection or from a descriptor set / `.proto` file (compiled with `protoc`
+  or `buf` when installed) and supports unary and all streaming kinds.
+- **Server-Sent Events** — `text/event-stream` responses show events as they
+  arrive; Stop keeps what was received.
+- **Bodies** — JSON, text, XML, form URL-encoded, multipart (text and file
+  parts), binary file, and GraphQL query + variables.
+- **Auth** — Basic, Bearer, API Key, and OAuth 2.0 (client credentials,
+  password, authorization code with PKCE, implicit) with token fetch, refresh,
+  and Keychain caching. Other spec auth types are preserved in the YAML.
+- **Scripts** — pre-request, post-response, and test scripts in JavaScript with
+  a Bruno-compatible `req` / `res` / `bru` / `test` / `expect` API. Scripts run
+  in JavaScriptCore with no file or network access and stop after 5 seconds.
+- **Captures and checks** — pull values from responses into variables and
+  assert on status, time, headers, and JSON paths.
+
+**Variables and environments**
+- `{{name}}` placeholders everywhere, colored green (defined), red (unknown),
+  or purple (built-in function), with the value on hover and completion after `{{`.
+- Built-in functions: `{{$uuid}}`, `{{$timestamp}}`, `{{$isoTimestamp}}`,
+  `{{$randomInt(1,10)}}`, `{{$base64(text)}}`, `{{$sha256(text)}}`,
+  `{{$hmacSha256(key, text)}}`, and more.
+- Collection and folder defaults: headers, auth, variables, scripts, and docs
+  that every request inside inherits.
+- Environment colors tint the Send button and a stripe above the editor.
+- **Secrets stay out of git** — mark a variable Secret and its value lives in
+  the macOS Keychain; the collection file holds the name only.
+
+**Responses**
+- Line numbers, word wrap, JSON folding, a collapsible tree, JSONPath and XPath
+  filters, image / PDF / HTML previews (HTML without JavaScript or network),
+  timing breakdown, cookies, console output, and diff with the previous response.
+- **History** of every send with its response; reopen the request or add it
+  back to the collection. Credential headers are never saved.
+- **Code generation** for cURL, HTTPie, JavaScript, Python, Go, and Swift.
+
+**Network**
+- Per-collection cookie jar, proxy (system, off, or custom with auth and
+  bypass list), client certificates (PKCS#12; PEM for gRPC), and an opt-in
+  switch to skip TLS verification for test servers.
+
+**Workflow**
+- `⌘K` command palette, sidebar search (`⌘⇧F`), drag and drop to reorder,
+  paste a cURL command into the URL bar, bulk edit params and headers as text,
+  response beside or below the request (`⌥⌘L`), and the collection's git branch
+  and changes in the sidebar.
 
 ## Build
 
@@ -74,8 +100,8 @@ Gowa.app/Contents/MacOS/gowa run collection.yml
 gowa run collection.yml --filter Users
 ```
 
-Runs every request top-to-bottom with `{{variables}}`, captures (chained
-tokens flow between requests), and checks. Exit codes: `0` all passed,
+Runs every HTTP and GraphQL request top-to-bottom with `{{variables}}`,
+scripts, captures (chained tokens flow between requests), and checks. Exit codes: `0` all passed,
 `1` failures, `2` usage error — CI-friendly.
 
 ## Tests
@@ -90,21 +116,29 @@ swift test
 2. `⌘S` saves the collection as `YourName.yml` there.
 3. Review and commit with git as usual — diffs are plain YAML, keys sorted
    deterministically.
-4. Reveal the file in Finder from the sidebar toolbar.
+4. The sidebar footer shows the branch and whether the collection file changed.
+
+## Where Gowa keeps data outside the collection
+
+| What | Where |
+| --- | --- |
+| Secret variable values, OAuth tokens | macOS Keychain (service `id.afrani.app.gowa`) |
+| Cookies with an expiry date | `~/Library/Application Support/Gowa/cookies/` (owner-only) |
+| Request history | `~/Library/Application Support/Gowa/history.json` (owner-only, credential headers removed) |
 
 ## Structure
 
 | File | Role |
 | --- | --- |
-| `Sources/gowa/GowaApp.swift` | App entry, window, ⌘N/⌘O/⌘S commands |
-| `Sources/gowa/ContentView.swift` | Split layout, environment switcher |
-| `Sources/gowa/CollectionSidebar.swift` | Collection tree, context menus, rename flow |
-| `Sources/gowa/RequestEditor.swift` | Tabbed request editor (params/headers/auth/body/settings) |
-| `Sources/gowa/ResponseViews.swift` | Status capsule, headers list, copy |
-| `Sources/gowa/AppState.swift` | Observable state, send pipeline (auth + interpolation) |
+| `Sources/gowa/GowaApp.swift` | App entry, menus, CLI dispatch |
+| `Sources/gowa/AppState.swift` | Observable state: selection, send, runner, history, WebSocket and gRPC sessions |
 | `Sources/gowa/OpenCollection.swift` | OpenCollection YAML model — dictionary-first for lossless round-trips |
-| `Sources/gowa/HTTPClient.swift` | Async URLSession engine |
-| `Sources/gowa/JSONHighlighter.swift` | UTF-16 tokenizer → TextKit color runs |
-| `Sources/gowa/BodyDisplay.swift` | Background-built response presentation |
-| `Sources/gowa/CodeViewer.swift` | NSTextView-based body viewer |
-| `Sources/gowa/HistoryStore.swift` | Persisted request history |
+| `Sources/gowa/RequestExecutor.swift` | The one send pipeline: variables, inheritance, scripts, OAuth, HTTP, captures, checks |
+| `Sources/gowa/HTTPClient.swift` | URLSession engine: streaming, cookies, proxy, TLS, client certs, timings |
+| `Sources/gowa/ScriptRunner.swift` | JavaScriptCore scripts and tests |
+| `Sources/gowa/OAuth2.swift` | OAuth 2.0 flows and token cache |
+| `Sources/gowa/GrpcClient.swift`, `ProtoCodec.swift` | gRPC calls, reflection, protobuf ⇄ JSON |
+| `Sources/gowa/WebSocket.swift` | WebSocket model and connection |
+| `Sources/gowa/RequestEditor.swift`, `ResponseViews.swift` | Request editor and response pane |
+| `Sources/gowa/CollectionSidebar.swift` | Collection tree, search, drag and drop, git status |
+| `Sources/gowa/CodeViewer.swift`, `CodeEditor.swift`, `VariableField.swift` | TextKit viewer and editors |
