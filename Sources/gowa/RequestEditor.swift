@@ -71,6 +71,15 @@ private struct EditorContent: View {
                 .font(.title3.weight(.semibold))
                 .textFieldStyle(.plain)
                 .accessibilityLabel("Request name")
+                .onAppear {
+                    // AppKit focuses the first text field with its text selected,
+                    // so one stray key would rename the request.
+                    DispatchQueue.main.async {
+                        if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+                            window.makeFirstResponder(nil)
+                        }
+                    }
+                }
 
                 HStack(spacing: 8) {
                     urlBar
