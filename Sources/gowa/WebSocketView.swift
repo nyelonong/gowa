@@ -34,7 +34,7 @@ struct WebSocketView: View {
                 HStack(spacing: 8) {
                     HStack(spacing: 8) {
                         Text("WS")
-                            .font(.system(.callout, design: .monospaced).weight(.bold))
+                            .font(Theme.mono(.callout, weight: .bold))
                             .foregroundStyle(.teal)
                         Divider().frame(height: 16)
                         VariableField(
@@ -210,7 +210,7 @@ private struct MessageLog: View {
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
                 Text(message.direction == .received || message.direction == .sent ? (JSONHighlighter.prettyPrint(message.text) ?? message.text) : message.text)
-                    .font(message.direction == .info || message.direction == .error ? .callout : .system(.callout, design: .monospaced))
+                    .font(message.direction == .info || message.direction == .error ? .callout : Theme.mono(.callout))
                     .foregroundStyle(message.direction == .error ? Color.red : Color.primary)
                     .textSelection(.enabled)
                     .lineLimit(40)

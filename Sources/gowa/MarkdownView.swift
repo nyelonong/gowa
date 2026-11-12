@@ -103,7 +103,7 @@ struct MarkdownView: View {
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.hairline).frame(width: 3) }
         case .code(let text):
             Text(text)
-                .font(.system(.callout, design: .monospaced))
+                .font(Theme.mono(.callout))
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))

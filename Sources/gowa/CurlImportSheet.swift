@@ -30,7 +30,7 @@ struct CurlImportSheet: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     TextEditor(text: $command)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(Theme.mono(.callout))
                         .scrollContentBackground(.hidden)
                         .background(Color(nsColor: .textBackgroundColor))
                         .overlay(
@@ -103,13 +103,13 @@ struct CurlImportSheet: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
                             Text(result.method)
-                                .font(.callout.weight(.semibold).monospaced())
+                                .font(Theme.mono(.callout, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
                                 .background(.blue, in: RoundedRectangle(cornerRadius: 5))
                             Text(result.url)
-                                .font(.system(.callout, design: .monospaced))
+                                .font(Theme.mono(.callout))
                                 .lineLimit(3)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,7 +163,7 @@ struct CurlImportSheet: View {
                 .foregroundStyle(.secondary)
             ForEach(lines, id: \.self) { line in
                 Text(line)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Theme.mono(.caption))
                     .textSelection(.enabled)
                     .lineLimit(3)
             }

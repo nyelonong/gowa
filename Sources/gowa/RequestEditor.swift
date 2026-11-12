@@ -117,7 +117,7 @@ private struct EditorContent: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(draft.method)
-                        .font(.system(.callout, design: .monospaced).weight(.bold))
+                        .font(Theme.mono(.callout, weight: .bold))
                         .foregroundStyle(Theme.methodColor(draft.method))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
@@ -195,6 +195,7 @@ private struct EditorContent: View {
             .buttonStyle(.borderedProminent)
             .tint(app.activeEnvironmentColor)
             .controlSize(.large)
+            .shadow(color: (app.activeEnvironmentColor ?? .accentColor).opacity(app.canSend ? 0.35 : 0), radius: 8, y: 2)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!app.canSend)
             .help("Send request (⌘↩)")
@@ -479,7 +480,7 @@ struct BodySection: View {
                     set: { type in commit { $0.fileContentType = type } }
                 ))
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.callout, design: .monospaced))
+                .font(Theme.mono(.callout))
                 .frame(maxWidth: 320)
             }
             Text("The file's bytes are sent as the request body. The collection stores only the path.")
@@ -552,7 +553,7 @@ struct CaptureRows: View {
                         set: { newName in update { snapshot in snapshot.captures[index].variableName = newName } }
                     ))
                     .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .frame(width: 160)
                     .accessibilityLabel("Variable name")
 
@@ -565,7 +566,7 @@ struct CaptureRows: View {
                         set: { newExpression in update { snapshot in snapshot.captures[index].expression = newExpression } }
                     ))
                     .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .accessibilityLabel("Capture expression")
 
                     Picker("", selection: Binding(
@@ -640,7 +641,7 @@ struct CheckRows: View {
                         set: { newExpression in commit { snapshot in snapshot.assertions[index].expression = newExpression } }
                     ))
                     .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .frame(width: 220)
                     .accessibilityLabel("Check expression")
 
@@ -662,7 +663,7 @@ struct CheckRows: View {
                         set: { newValue in commit { snapshot in snapshot.assertions[index].value = newValue } }
                     ))
                     .textFieldStyle(.plain)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .accessibilityLabel("Expected value")
                     .disabled(draft.assertions[index].op.hasPrefix("is") || draft.assertions[index].op == "exists" || draft.assertions[index].op == "notExists")
 
@@ -709,7 +710,7 @@ struct SettingsSection: View {
                 Text("Timeout (milliseconds)")
                     .font(.callout)
                 TextField("0 = no timeout", text: $timeoutText)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 130)
                     .onSubmit(commitTimeout)

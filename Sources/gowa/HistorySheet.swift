@@ -61,10 +61,7 @@ struct HistorySheet: View {
         List(selection: $selection) {
             ForEach(entries) { entry in
                 HStack(spacing: 8) {
-                    Text(Theme.shortMethod(entry.method))
-                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Theme.methodColor(entry.method))
-                        .frame(width: 34, alignment: .trailing)
+                    MethodBadge(kind: "http", method: entry.method)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.requestName ?? entry.url)
                             .lineLimit(1)
@@ -103,8 +100,8 @@ struct HistorySheet: View {
         if let entry = app.history.entries.first(where: { $0.id == selection }) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(entry.method).font(.system(.callout, design: .monospaced).weight(.bold)).foregroundStyle(Theme.methodColor(entry.method))
-                    Text(entry.url).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    Text(entry.method).font(Theme.mono(.callout, weight: .bold)).foregroundStyle(Theme.methodColor(entry.method))
+                    Text(entry.url).font(Theme.mono(.callout)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     Spacer(minLength: 8)
                     if entry.collectionID == app.document?.documentID, entry.nodeID != nil {
                         Button("Open Request") {
@@ -168,8 +165,8 @@ struct HistorySheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(headers.indices, id: \.self) { index in
                     HStack(alignment: .top, spacing: 8) {
-                        Text(headers[index].name).font(.system(.caption, design: .monospaced).weight(.medium)).frame(width: 180, alignment: .leading)
-                        Text(headers[index].value).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(headers[index].name).font(Theme.mono(.caption, weight: .medium)).frame(width: 180, alignment: .leading)
+                        Text(headers[index].value).font(Theme.mono(.caption)).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 if headers.isEmpty {

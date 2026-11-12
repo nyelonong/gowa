@@ -11,11 +11,11 @@ enum JSONHighlighter {
 
         var color: NSColor {
             switch self {
-            case .key: .systemPink
-            case .string: .systemGreen
-            case .number: .systemBlue
-            case .literal: .systemPurple
-            case .punctuation: .secondaryLabelColor
+            case .key: Theme.Syntax.key
+            case .string: Theme.Syntax.string
+            case .number: Theme.Syntax.number
+            case .literal: Theme.Syntax.literal
+            case .punctuation: Theme.Syntax.punctuation
             }
         }
     }
@@ -191,7 +191,7 @@ enum JSONHighlighter {
     static func attributed(_ text: String, runs: [Run]) -> NSAttributedString {
         let out = NSMutableAttributedString(string: text)
         let full = NSRange(location: 0, length: (text as NSString).length)
-        out.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), range: full)
+        out.addAttribute(.font, value: Theme.nsMono(13), range: full)
         out.addAttribute(.foregroundColor, value: NSColor.labelColor, range: full)
         for run in runs {
             out.addAttribute(.foregroundColor, value: run.kind.color, range: run.range)

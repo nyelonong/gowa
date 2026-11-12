@@ -33,6 +33,7 @@ struct GowaApp: App {
         }
         .windowResizability(.contentMinSize)
         .commands {
+            AppearanceCommands()
             CommandGroup(after: .textEditing) {
                 Button("Find in Response") { app.beginFindInResponse() }
                     .keyboardShortcut("f", modifiers: .command)
@@ -57,6 +58,19 @@ struct GowaApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(app.document == nil)
             }
+        }
+    }
+}
+
+struct AppearanceCommands: Commands {
+    @AppStorage(Theme.glassKey) private var glass = true
+    @AppStorage(Theme.ligaturesKey) private var ligatures = true
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Toggle("Glass Window", isOn: $glass)
+            Toggle("Code Ligatures", isOn: $ligatures)
+            Divider()
         }
     }
 }

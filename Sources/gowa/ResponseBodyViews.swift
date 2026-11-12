@@ -52,11 +52,11 @@ struct JSONTreeView: View {
             OutlineGroup(rootNode.children ?? [rootNode], children: \.children) { node in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(node.key)
-                        .font(.system(.callout, design: .monospaced).weight(node.isTruncationNote ? .regular : .medium))
+                        .font(Theme.mono(.callout).weight(node.isTruncationNote ? .regular : .medium))
                         .foregroundStyle(node.isTruncationNote ? Color.secondary : Color.pink)
                     if !node.isTruncationNote {
                         Text(node.summary.text)
-                            .font(.system(.callout, design: .monospaced))
+                            .font(Theme.mono(.callout))
                             .foregroundStyle(node.summary.color)
                             .lineLimit(1)
                             .truncationMode(.tail)

@@ -102,7 +102,7 @@ struct AuthEditor: View {
                 if secure {
                     SecureField("Supports {{vars}}", text: text)
                         .textFieldStyle(.plain)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(Theme.mono(.callout))
                 } else {
                     VariableField("Supports {{vars}}", text: text, variables: variables)
                 }

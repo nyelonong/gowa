@@ -18,6 +18,8 @@ if [ -f AppIcon.icns ]; then
 fi
 
 cp .build/release/gowa "$APP/Contents/MacOS/gowa"
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp Resources/Fonts/*.ttf Resources/Fonts/OFL.txt "$APP/Contents/Resources/Fonts/"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +42,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppTransportSecurity</key>

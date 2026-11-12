@@ -200,9 +200,9 @@ struct CookieRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(cookie.name).font(.system(.callout, design: .monospaced).weight(.medium))
+                    Text(cookie.name).font(Theme.mono(.callout, weight: .medium))
                     Text(cookie.value)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(Theme.mono(.callout))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

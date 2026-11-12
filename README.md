@@ -88,6 +88,13 @@ swift build -c release && scripts/make-app.sh
   response beside or below the request (`⌥⌘L`), and the collection's git branch
   and changes in the sidebar.
 
+**Look**
+- A frosted-glass window with the request and response on separate panels, in
+  light and dark mode. Turn it off with View › Glass Window.
+- Code in [JetBrains Mono](https://www.jetbrains.com/lp/mono/) with ligatures
+  (`=>`, `!==`); turn them off with View › Code Ligatures. The font is bundled
+  under the SIL Open Font License (`Resources/Fonts/OFL.txt`).
+
 ## Build
 
 Requires Xcode with the Swift 6 toolchain and macOS 15+.

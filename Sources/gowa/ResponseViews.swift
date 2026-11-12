@@ -69,7 +69,7 @@ struct ResponseArea: View {
                     HStack(spacing: 4) {
                         Text("Press")
                         Text("⌘↩")
-                            .font(.caption.weight(.medium).monospaced())
+                            .font(Theme.mono(.caption, weight: .medium))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
@@ -100,19 +100,19 @@ extension ResponseArea {
                             .foregroundStyle(outcome.pass ? .green : .red)
                             .font(.caption2)
                         Text(outcome.expression)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(Theme.mono(.caption))
                         Text(outcome.op)
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(Theme.mono(.caption2))
                             .foregroundStyle(.secondary)
                         if let expected = outcome.expected {
                             Text("= \(expected)")
-                                .font(.system(.caption, design: .monospaced))
+                                .font(Theme.mono(.caption))
                                 .foregroundStyle(.secondary)
                         }
                         if let actual = outcome.actual {
                             let actualColor: Color = outcome.pass ? .secondary : .red
                             Text("got \(actual)")
-                                .font(.system(.caption, design: .monospaced))
+                                .font(Theme.mono(.caption))
                                 .foregroundStyle(actualColor)
                                 .lineLimit(1)
                                 .frame(maxWidth: 200, alignment: .leading)
@@ -132,7 +132,7 @@ extension ResponseArea {
                             .font(.caption)
                         if let error = test.error {
                             Text(error)
-                                .font(.system(.caption, design: .monospaced))
+                                .font(Theme.mono(.caption))
                                 .foregroundStyle(.red)
                                 .lineLimit(1)
                                 .frame(maxWidth: 260, alignment: .leading)
@@ -168,9 +168,9 @@ extension ResponseArea {
                 ForEach(app.lastCaptures, id: \.name) { capture in
                     HStack(spacing: 4) {
                         Text("{{\(capture.name)}}")
-                            .font(.system(.caption, design: .monospaced).weight(.medium))
+                            .font(Theme.mono(.caption, weight: .medium))
                         Text("= \(capture.value)")
-                            .font(.system(.caption, design: .monospaced))
+                            .font(Theme.mono(.caption))
                             .foregroundStyle(capture.value == "<not found>" ? .red : .secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -287,6 +287,7 @@ struct ResponseView: View {
                     Circle()
                         .fill(statusColor)
                         .frame(width: 7, height: 7)
+                        .shadow(color: statusColor.opacity(0.8), radius: 4)
                     Text("\(result.status) \(result.statusPhrase)")
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(statusColor)
@@ -449,7 +450,7 @@ struct ResponseView: View {
                         .foregroundStyle(.secondary)
                     TextField(display.isJSON ? "Filter with JSONPath, e.g. $.data[*].id or $..name" : "Filter with XPath, e.g. //item/@id", text: $filter)
                         .textFieldStyle(.plain)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(Theme.mono(.callout))
                     if !filter.isEmpty {
                         Button {
                             filter = ""
@@ -498,11 +499,11 @@ struct ResponseView: View {
                 ForEach(result.headers, id: \.name) { header in
                     HStack(alignment: .top, spacing: 0) {
                         Text(header.name)
-                            .font(.system(.callout, design: .monospaced).weight(.medium))
+                            .font(Theme.mono(.callout, weight: .medium))
                             .frame(width: 220, alignment: .leading)
                             .textSelection(.enabled)
                         Text(header.value)
-                            .font(.system(.callout, design: .monospaced))
+                            .font(Theme.mono(.callout))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -571,11 +572,11 @@ struct DiffViewer: View {
                 }()
                 HStack(spacing: 0) {
                     Text(prefix)
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .font(Theme.mono(.caption2, weight: .bold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18)
                     Text(lineText(line))
-                        .font(.system(.caption, design: .monospaced))
+                        .font(Theme.mono(.caption))
                         .textSelection(.enabled)
                         .lineLimit(1)
                 }
@@ -656,11 +657,11 @@ struct ConsoleView: View {
                         let log = logs[index]
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(log.level)
-                                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                                .font(Theme.mono(.caption2, weight: .semibold))
                                 .foregroundStyle(color(log.level))
                                 .frame(width: 40, alignment: .leading)
                             Text(log.message)
-                                .font(.system(.callout, design: .monospaced))
+                                .font(Theme.mono(.callout))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -708,7 +709,7 @@ struct EventsView: View {
                             }
                         }
                         Text(JSONHighlighter.prettyPrint(event.data) ?? event.data)
-                            .font(.system(.callout, design: .monospaced))
+                            .font(Theme.mono(.callout))
                             .textSelection(.enabled)
                     }
                     .id(event.id)

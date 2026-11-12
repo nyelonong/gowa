@@ -2,7 +2,11 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var app
-    @AppStorage("gowa.layout.sideBySide") private var sideBySide = false
+    @AppStorage("gowa.layout.sideBySide") private var sideBySide = true
+    @AppStorage("gowa.layout.split.horizontal") private var horizontalSplit = 0.45
+    @AppStorage("gowa.layout.split.vertical") private var verticalSplit = 0.5
+    @AppStorage(Theme.glassKey) private var glass = true
+    @AppStorage(Theme.ligaturesKey) private var ligatures = true
 
     var body: some View {
         NavigationSplitView {
@@ -10,6 +14,8 @@ struct ContentView: View {
         } detail: {
             detail
         }
+        .background(WindowBackground(glass: glass).ignoresSafeArea())
+        .toolbarBackgroundVisibility(glass ? .hidden : .automatic, for: .windowToolbar)
         .navigationTitle(app.draft?.name ?? app.document?.name ?? "Gowa")
         .frame(minWidth: 960, minHeight: 620)
         .alert("Couldn't open collection", isPresented: Binding(
@@ -27,42 +33,48 @@ struct ContentView: View {
             if app.document == nil {
                 welcome
             } else {
-                VStack(spacing: 0) {
-                    if let color = app.activeEnvironmentColor {
-                        color.frame(height: 3)
-                            .accessibilityLabel("Environment \(app.activeEnvironment ?? "") color")
-                    }
+                VStack(spacing: Theme.paneGap) {
                     if !app.missingSecrets.isEmpty {
                         missingSecretsBar
                     }
 
                     if app.draft != nil {
-                        if sideBySide {
-                            HSplitView {
-                                RequestEditor(app: app)
-                                    .id(app.selectedRequestPath)
-                                    .frame(minWidth: 460, maxWidth: .infinity)
-                                ResponseArea(app: app)
-                                    .frame(minWidth: 360, maxWidth: .infinity)
-                            }
-                        } else {
-                            VSplitView {
-                                RequestEditor(app: app)
-                                    .id(app.selectedRequestPath)
-                                    .frame(minHeight: 300)
-                                ResponseArea(app: app)
-                                    .frame(minHeight: 180)
-                                    .layoutPriority(1)
-                            }
+                        PaneSplit(
+                            axis: sideBySide ? .horizontal : .vertical,
+                            fraction: sideBySide ? $horizontalSplit : $verticalSplit,
+                            minFirst: sideBySide ? 420 : 260,
+                            minSecond: sideBySide ? 340 : 180
+                        ) {
+                            RequestEditor(app: app)
+                                .id(EditorIdentity(path: app.selectedRequestPath, ligatures: ligatures))
+                                .panel(glass: glass)
+                        } second: {
+                            ResponseArea(app: app)
+                                .id(ligatures)
+                                .panel(glass: glass)
                         }
                     } else if let grpc = app.grpcDraft {
                         GrpcView(app: app, draft: grpc)
-                            .id(app.selectedRequestPath)
+                            .id(EditorIdentity(path: app.selectedRequestPath, ligatures: ligatures))
+                            .panel(glass: glass)
                     } else if let socket = app.socketDraft {
                         WebSocketView(app: app, draft: socket)
-                            .id(app.selectedRequestPath)
+                            .id(EditorIdentity(path: app.selectedRequestPath, ligatures: ligatures))
+                            .panel(glass: glass)
                     } else {
                         RequestEditor(app: app)
+                            .panel(glass: glass)
+                    }
+                }
+                .padding([.horizontal, .bottom], Theme.paneGap)
+                .padding(.top, 2)
+                .overlay(alignment: .top) {
+                    if let color = app.activeEnvironmentColor {
+                        color
+                            .frame(height: 2)
+                            .shadow(color: color.opacity(0.9), radius: 6)
+                            .ignoresSafeArea(edges: .top)
+                            .accessibilityLabel("Environment \(app.activeEnvironment ?? "") color")
                     }
                 }
             }
@@ -206,10 +218,9 @@ struct ContentView: View {
                 .controlSize(.small)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(.orange.opacity(0.10))
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.panelRadius))
     }
 
     private var welcome: some View {
@@ -250,4 +261,11 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+}
+
+/// Rebuilds an editor for another request, or when the code font changes
+/// (text views read their font once, when created).
+private struct EditorIdentity: Hashable {
+    let path: NodePath?
+    let ligatures: Bool
 }

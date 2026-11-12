@@ -117,7 +117,7 @@ struct VariableRows: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextField("New variable name", text: $newVariableName)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .focused($newNameFocused)
                     .onSubmit(addVariable)
 
@@ -213,7 +213,7 @@ struct VariableRow: View {
     var body: some View {
         HStack(spacing: 8) {
             TextField("", text: $editingName)
-                .font(.system(.callout, design: .monospaced))
+                .font(Theme.mono(.callout))
                 .frame(width: 160)
                 .onSubmit { commitName() }
                 .accessibilityLabel("Variable name")
@@ -221,7 +221,7 @@ struct VariableRow: View {
             if variable.secret {
                 SecureField(isStored ? "•••• stored in Keychain" : "Enter value — stored in Keychain",
                             text: $editingValue)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .onSubmit { commitValue() }
                     .accessibilityLabel("Secret variable value")
                     .onDisappear { commitValue() }
@@ -233,7 +233,7 @@ struct VariableRow: View {
                 }
             } else {
                 TextField("", text: $editingValue)
-                    .font(.system(.callout, design: .monospaced))
+                    .font(Theme.mono(.callout))
                     .onSubmit { commitValue() }
                     .accessibilityLabel("Variable value")
             }

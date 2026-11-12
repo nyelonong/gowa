@@ -75,7 +75,7 @@ struct VariableField: View {
             .overlay(alignment: .leading) {
                 if text.isEmpty {
                     Text(placeholder)
-                        .font(.system(size: fontSize, design: .monospaced))
+                        .font(Theme.mono(size: fontSize))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .allowsHitTesting(false)
@@ -105,7 +105,7 @@ private struct TokenTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.drawsBackground = false
-        textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        textView.font = Theme.nsMono(fontSize)
         textView.textContainerInset = NSSize(width: 0, height: 2)
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = false
@@ -199,7 +199,7 @@ private struct TokenTextView: NSViewRepresentable {
 
         func highlight(_ textView: NSTextView) {
             guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
-            let font = NSFont.monospacedSystemFont(ofSize: parent.fontSize, weight: .regular)
+            let font = Theme.nsMono(parent.fontSize)
             let full = NSRange(location: 0, length: storage.length)
             storage.beginEditing()
             storage.setAttributes([.font: font, .foregroundColor: NSColor.labelColor], range: full)

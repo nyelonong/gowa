@@ -379,12 +379,8 @@ struct SidebarRow: View {
     }
 
     private var requestLabel: some View {
-        HStack(spacing: 6) {
-            Text(Theme.badge(kind: node.node.kind, method: node.node.method))
-                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(Theme.badgeColor(kind: node.node.kind, method: node.node.method))
-                .frame(width: 36, alignment: .trailing)
-                .accessibilityLabel(node.node.method ?? "HTTP")
+        HStack(spacing: 8) {
+            MethodBadge(kind: node.node.kind, method: node.node.method)
             Text(node.name)
                 .font(.callout)
                 .fontWeight(isSelected ? .medium : .regular)
@@ -458,11 +454,11 @@ struct GitFooter: View {
             ForEach(status.changes.prefix(40)) { change in
                 HStack(spacing: 8) {
                     Text(change.code.trimmingCharacters(in: .whitespaces))
-                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .font(Theme.mono(.caption, weight: .bold))
                         .foregroundStyle(change.code.contains("?") ? Color.green : Color.orange)
                         .frame(width: 22, alignment: .leading)
                     Text(change.path)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(Theme.mono(.caption))
                         .fontWeight(change == status.collectionChange ? .semibold : .regular)
                         .lineLimit(1)
                         .truncationMode(.middle)

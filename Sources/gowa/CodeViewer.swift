@@ -88,10 +88,9 @@ struct CodeViewer: NSViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.allowsUndo = false
-        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.font = Theme.nsMono(13)
         textView.textColor = .labelColor
-        textView.backgroundColor = .textBackgroundColor
-        textView.drawsBackground = true
+        textView.drawsBackground = false
         textView.isVerticallyResizable = true
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -104,7 +103,8 @@ struct CodeViewer: NSViewRepresentable {
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        scroll.drawsBackground = true
+        scroll.drawsBackground = false
+        scroll.contentView.drawsBackground = false
 
         let coordinator = context.coordinator
         let ruler = LineNumberRuler(scrollView: scroll, textView: textView, coordinator: coordinator) { [weak textView] line in
@@ -219,10 +219,12 @@ private final class LineNumberRuler: NSRulerView {
 
     @objc private func redraw() { needsDisplay = true }
 
+    override func draw(_ dirtyRect: NSRect) {
+        drawHashMarksAndLabels(in: dirtyRect)
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView, let layout = textView.layoutManager, let container = textView.textContainer else { return }
-        NSColor.textBackgroundColor.setFill()
-        bounds.fill()
         let glyphs = layout.glyphRange(forBoundingRect: textView.visibleRect, in: container)
         let starts = coordinator.lineStarts
         var lastLine = -1

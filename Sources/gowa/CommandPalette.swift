@@ -110,16 +110,15 @@ struct CommandPalette: View {
             Group {
                 switch item.kind {
                 case .request:
-                    Text(item.badge ?? "")
-                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(["GQL": Color.pink, "WS": .teal, "gRPC": .indigo][item.badge ?? ""] ?? Theme.methodColor(item.badge))
+                    let kind = ["GQL": "graphql", "WS": "websocket", "gRPC": "grpc"][item.badge ?? ""] ?? "http"
+                    MethodBadge(kind: kind, method: kind == "http" ? (item.badge == "DEL" ? "DELETE" : item.badge) : nil)
                 case .environment:
                     Image(systemName: "globe").foregroundStyle(.secondary)
                 case .action:
                     Image(systemName: "command").foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 36, alignment: .trailing)
+            .frame(width: 40, alignment: .trailing)
             Text(item.title).lineLimit(1)
             Text(item.subtitle)
                 .font(.caption)

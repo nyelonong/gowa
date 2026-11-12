@@ -134,7 +134,7 @@ struct OAuth2Editor: View {
         } else if let token {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Token: \(token.accessToken.prefix(12))…")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Theme.mono(.caption))
                 Text(expiry(token))
                     .font(.caption)
                     .foregroundStyle(token.isExpired() ? .orange : .secondary)
@@ -161,7 +161,7 @@ struct OAuth2Editor: View {
                 if secure {
                     SecureField(placeholder, text: text)
                         .textFieldStyle(.plain)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(Theme.mono(.callout))
                 } else {
                     VariableField(placeholder, text: text, variables: variables)
                 }

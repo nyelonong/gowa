@@ -66,7 +66,7 @@ struct RunnerRow: View {
                 stateIcon
 
                 Text(entry.method)
-                    .font(.caption.weight(.semibold).monospaced())
+                    .font(Theme.mono(.caption, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 46, alignment: .leading)
 
@@ -99,19 +99,19 @@ struct RunnerRow: View {
                                 .foregroundStyle(stateColor)
                                 .font(.caption2)
                             Text(outcome.expression)
-                                .font(.system(.caption, design: .monospaced))
+                                .font(Theme.mono(.caption))
                             Text(outcome.op)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             if let expected = outcome.expected {
                                 Text("expected [\(expected)]")
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(Theme.mono(.caption))
                                     .foregroundStyle(.secondary)
                             }
                             if let actual = outcome.actual {
                                 let actualColor: Color = outcome.pass ? .secondary : .red
                                 Text("got [\(actual)]")
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(Theme.mono(.caption))
                                     .foregroundStyle(actualColor)
                                     .lineLimit(1)
                             }

@@ -37,7 +37,7 @@ struct GrpcView: View {
                 HStack(spacing: 8) {
                     HStack(spacing: 8) {
                         Text("gRPC")
-                            .font(.system(.callout, design: .monospaced).weight(.bold))
+                            .font(Theme.mono(.callout, weight: .bold))
                             .foregroundStyle(.indigo)
                         Divider().frame(height: 16)
                         VariableField(
@@ -137,7 +137,7 @@ struct GrpcView: View {
                 .disabled(session.loadingSchema)
         } label: {
             Text(draft.method.isEmpty ? "Choose method" : (draft.method.split(separator: "/").last.map(String.init) ?? draft.method))
-                .font(.system(.callout, design: .monospaced))
+                .font(Theme.mono(.callout))
                 .lineLimit(1)
         }
         .menuStyle(.button)
@@ -151,7 +151,7 @@ struct GrpcView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Text(draft.method.isEmpty ? "No method chosen" : draft.method)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Theme.mono(.caption))
                     .foregroundStyle(.secondary)
                 Text(draft.methodType)
                     .font(.caption.weight(.medium))
@@ -322,8 +322,8 @@ private struct GrpcResultView: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(pairs.indices, id: \.self) { index in
                     HStack(alignment: .top, spacing: 8) {
-                        Text(pairs[index].name).font(.system(.callout, design: .monospaced).weight(.medium)).frame(width: 220, alignment: .leading)
-                        Text(pairs[index].value).font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(pairs[index].name).font(Theme.mono(.callout, weight: .medium)).frame(width: 220, alignment: .leading)
+                        Text(pairs[index].value).font(Theme.mono(.callout)).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 if pairs.isEmpty { Text("None").font(.callout).foregroundStyle(.tertiary) }

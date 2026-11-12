@@ -8,7 +8,7 @@ struct CodeEditor: NSViewRepresentable {
     var highlightsJSON: Bool
     var variables: VariableScope? = nil
 
-    private static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    private static var font: NSFont { Theme.nsMono(13) }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -93,6 +93,7 @@ struct CodeEditor: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
+        scroll.contentView.drawsBackground = false
         return scroll
     }
 
