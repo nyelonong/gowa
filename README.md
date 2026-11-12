@@ -98,11 +98,25 @@ Gowa.app/Contents/MacOS/gowa run collection.yml
 
 # only requests whose name contains "Users"
 gowa run collection.yml --filter Users
+
+# list folders and requests with their IDs, then run one request or folder
+gowa list collection.yml
+gowa run collection.yml --id 0.2
+
+# one JSON report with each response's status, headers, body, and check results
+gowa run collection.yml --id 0.2 --json
+gowa list collection.yml --json
 ```
 
 Runs every HTTP and GraphQL request top-to-bottom with `{{variables}}`,
 scripts, captures (chained tokens flow between requests), and checks. Exit codes: `0` all passed,
 `1` failures, `2` usage error — CI-friendly.
+
+JSON reports show request URLs as written (`{{base}}/users`) and leave out
+request headers, so Gowa does not print variable or secret values itself.
+Responses and script output (`console.log`, test messages) are reported as
+received, including any tokens in them. Bodies over 1 MB are
+cut, and non-text bodies are base64.
 
 ## Tests
 
