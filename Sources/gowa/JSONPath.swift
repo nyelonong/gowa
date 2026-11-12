@@ -133,10 +133,45 @@ enum JSONPath {
     /// Pretty JSON for the matches: a single value alone, several as an array.
     static func render(_ matches: [Any]) -> String {
         let value: Any = matches.count == 1 ? matches[0] : matches
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes]) else {
-            return "\(value)"
+        guard let compact = compactJSON(value) else { return "\(value)" }
+        return JSONHighlighter.prettyPrint(compact) ?? compact
+    }
+
+    /// JSONSerialization writes a parsed 4.7 as 4.7000000000000002, so
+    /// numbers are written here with Swift's shortest round-trip form.
+    private static func compactJSON(_ value: Any) -> String? {
+        switch value {
+        case is NSNull:
+            return "null"
+        case let number as NSDecimalNumber:
+            return number.stringValue
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
+            if CFNumberIsFloatType(number) {
+                let double = number.doubleValue
+                return double.isFinite ? "\(double)" : nil
+            }
+            return number.stringValue
+        case let text as String:
+            return (try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes]))
+                .map { String(decoding: $0, as: UTF8.self) }
+        case let array as [Any]:
+            var parts: [String] = []
+            for element in array {
+                guard let part = compactJSON(element) else { return nil }
+                parts.append(part)
+            }
+            return "[" + parts.joined(separator: ",") + "]"
+        case let object as [String: Any]:
+            var parts: [String] = []
+            for key in object.keys.sorted() {
+                guard let name = compactJSON(key), let part = compactJSON(object[key]!) else { return nil }
+                parts.append(name + ":" + part)
+            }
+            return "{" + parts.joined(separator: ",") + "}"
+        default:
+            return nil
         }
-        return String(data: data, encoding: .utf8) ?? ""
     }
 }
 

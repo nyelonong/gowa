@@ -39,3 +39,22 @@ func xpathFilter() throws {
     let xml = Data("<r><item id=\"1\">a</item><item id=\"2\">b</item></r>".utf8)
     #expect(try XPathFilter.evaluate("//item[@id='2']", xml: xml) == #"<item id="2">b</item>"#)
 }
+
+@Test("filter results keep short number spelling and escape strings")
+func renderNumbers() throws {
+    let document = try JSONSerialization.jsonObject(with: Data(#"{"items":[{"rating":4.7,"price":129.5,"qty":3,"big":12345678901234,"ok":true,"none":null,"note":"a \"b\" / é"}]}"#.utf8))
+    #expect(JSONPath.render(try JSONPath.evaluate("$.items[0].rating", on: document)) == "4.7")
+    let rendered = JSONPath.render(try JSONPath.evaluate("$.items[0]", on: document))
+    #expect(rendered == """
+    {
+      "big": 12345678901234,
+      "none": null,
+      "note": "a \\"b\\" / é",
+      "ok": true,
+      "price": 129.5,
+      "qty": 3,
+      "rating": 4.7
+    }
+    """)
+    #expect(JSONPath.render([4.7, 1, "x"]) == "[\n  4.7,\n  1,\n  \"x\"\n]")
+}
