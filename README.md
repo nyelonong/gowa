@@ -1,8 +1,7 @@
 # Gowa
 
-A fast, light, beautiful HTTP client for macOS — native SwiftUI, with
-collections stored as [OpenCollection](https://www.opencollection.com/) YAML
-files you can keep in git.
+A fast, native HTTP client for macOS, with collections stored as
+[OpenCollection](https://www.opencollection.com/) YAML files you can keep in git.
 
 ![A request with query parameters, passing checks, and a highlighted JSON response](docs/screenshots/request.png)
 
