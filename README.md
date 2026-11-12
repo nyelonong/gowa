@@ -4,6 +4,21 @@ A fast, light, beautiful HTTP client for macOS — native SwiftUI, with
 collections stored as [OpenCollection](https://www.opencollection.com/) YAML
 files you can keep in git.
 
+![A request with query parameters, passing checks, and a highlighted JSON response](docs/screenshots/request.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/side-by-side.png" alt="Request and response side by side"></td>
+    <td><img src="docs/screenshots/command-palette.png" alt="Command palette for jumping to requests and environments"></td>
+    <td><img src="docs/screenshots/generate-code.png" alt="Generate code sheet showing a cURL command"></td>
+  </tr>
+  <tr>
+    <td align="center">Side-by-side layout</td>
+    <td align="center">Command palette (⌘K)</td>
+    <td align="center">Generate code</td>
+  </tr>
+</table>
+
 ## Install
 
 **One line** — downloads the latest release into `/Applications`:
