@@ -65,9 +65,15 @@ struct GowaApp: App {
 struct AppearanceCommands: Commands {
     @AppStorage(Theme.glassKey) private var glass = true
     @AppStorage(Theme.ligaturesKey) private var ligatures = true
+    @AppStorage(Theme.appearanceKey) private var appearance = Theme.Appearance.system.rawValue
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(Theme.Appearance.allCases) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
             Toggle("Glass Window", isOn: $glass)
             Toggle("Code Ligatures", isOn: $ligatures)
             Divider()

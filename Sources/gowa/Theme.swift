@@ -10,6 +10,29 @@ enum Theme {
 
     static let glassKey = "gowa.glass"
     static let ligaturesKey = "gowa.codeLigatures"
+    static let appearanceKey = "gowa.appearance"
+
+    /// View › Appearance choices, stored as their raw value.
+    enum Appearance: String, CaseIterable, Identifiable {
+        case system, light, dark
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .system: "System"
+            case .light: "Light"
+            case .dark: "Dark"
+            }
+        }
+
+        var nsAppearance: NSAppearance? {
+            switch self {
+            case .system: nil
+            case .light: NSAppearance(named: .aqua)
+            case .dark: NSAppearance(named: .darkAqua)
+            }
+        }
+    }
 
     // MARK: Code font
 

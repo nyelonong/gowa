@@ -90,7 +90,8 @@ swift build -c release && scripts/make-app.sh
 
 **Look**
 - A frosted-glass window with the request and response on separate panels, in
-  light and dark mode. Turn it off with View › Glass Window.
+  light and dark mode. View › Appearance picks System, Light, or Dark; turn
+  the glass off with View › Glass Window.
 - Code in [JetBrains Mono](https://www.jetbrains.com/lp/mono/) with ligatures
   (`=>`, `!==`); turn them off with View › Code Ligatures. The font is bundled
   under the SIL Open Font License (`Resources/Fonts/OFL.txt`).

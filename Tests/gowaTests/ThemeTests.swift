@@ -32,3 +32,11 @@ func ligatureSetting() throws {
     #expect(glyphs(on, "a => b !== c") != glyphs(off, "a => b !== c"))
     #expect(glyphs(on, "abc") == glyphs(off, "abc"))
 }
+
+@Test("appearance choices map to the system, light, and dark appearances")
+func appearanceChoices() {
+    #expect(Theme.Appearance.system.nsAppearance == nil)
+    #expect(Theme.Appearance.light.nsAppearance?.name == .aqua)
+    #expect(Theme.Appearance.dark.nsAppearance?.name == .darkAqua)
+    #expect(Theme.Appearance(rawValue: "unknown") == nil)
+}

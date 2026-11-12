@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("gowa.layout.split.vertical") private var verticalSplit = 0.5
     @AppStorage(Theme.glassKey) private var glass = true
     @AppStorage(Theme.ligaturesKey) private var ligatures = true
+    @AppStorage(Theme.appearanceKey) private var appearance = Theme.Appearance.system.rawValue
 
     var body: some View {
         NavigationSplitView {
@@ -16,6 +17,9 @@ struct ContentView: View {
         }
         .background(WindowBackground(glass: glass).ignoresSafeArea())
         .toolbarBackgroundVisibility(glass ? .hidden : .automatic, for: .windowToolbar)
+        .onChange(of: appearance, initial: true) { _, value in
+            NSApp.appearance = (Theme.Appearance(rawValue: value) ?? .system).nsAppearance
+        }
         .navigationTitle(app.draft?.name ?? app.document?.name ?? "Gowa")
         .frame(minWidth: 960, minHeight: 620)
         .alert("Couldn't open collection", isPresented: Binding(
