@@ -34,13 +34,77 @@ enum JSONHighlighter {
             || (trimmed.hasPrefix("[") && trimmed.hasSuffix("]"))
     }
 
+    /// Re-indents valid JSON from its own text, so key order and number
+    /// spelling stay as sent (a parse-and-write round trip prints 4.7 as
+    /// 4.7000000000000002 and sorts keys).
     static func prettyPrint(_ text: String) -> String? {
         guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              let formatted = String(data: pretty, encoding: .utf8)
+              (try? JSONSerialization.jsonObject(with: data)) != nil
         else { return nil }
-        return formatted
+        return reindent(Array(data))
+    }
+
+    private static func reindent(_ bytes: [UInt8]) -> String {
+        let quote: UInt8 = 0x22, backslash: UInt8 = 0x5C
+        var out: [UInt8] = []
+        out.reserveCapacity(bytes.count + bytes.count / 2)
+        var depth = 0
+
+        func isSpace(_ byte: UInt8) -> Bool { byte == 0x20 || byte == 0x0A || byte == 0x09 || byte == 0x0D }
+        func newline() {
+            out.append(0x0A)
+            out.append(contentsOf: repeatElement(0x20, count: depth * 2))
+        }
+
+        var i = 0
+        while i < bytes.count {
+            let byte = bytes[i]
+            switch byte {
+            case quote:
+                out.append(byte)
+                i += 1
+                while i < bytes.count {
+                    let unit = bytes[i]
+                    out.append(unit)
+                    i += 1
+                    if unit == backslash, i < bytes.count {
+                        out.append(bytes[i])
+                        i += 1
+                    } else if unit == quote {
+                        break
+                    }
+                }
+                continue
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                out.append(byte)
+                var next = i + 1
+                while next < bytes.count, isSpace(bytes[next]) { next += 1 }
+                let close = byte == UInt8(ascii: "{") ? UInt8(ascii: "}") : UInt8(ascii: "]")
+                if next < bytes.count, bytes[next] == close {
+                    out.append(close)
+                    i = next + 1
+                    continue
+                }
+                depth += 1
+                newline()
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                depth -= 1
+                newline()
+                out.append(byte)
+            case UInt8(ascii: ","):
+                out.append(byte)
+                newline()
+            case UInt8(ascii: ":"):
+                out.append(byte)
+                out.append(0x20)
+            case _ where isSpace(byte):
+                break
+            default:
+                out.append(byte)
+            }
+            i += 1
+        }
+        return String(decoding: out, as: UTF8.self)
     }
 
     /// Tokenize JSON into color runs over UTF-16 offsets (NSRange-compatible).

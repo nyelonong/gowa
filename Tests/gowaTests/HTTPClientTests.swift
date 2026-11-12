@@ -45,12 +45,33 @@ func jsonDetection() {
     #expect(JSONHighlighter.isJSON("anything", contentType: "application/json"))
 }
 
-@Test("pretty print formats and sorts")
+@Test("pretty print keeps key order, number spelling, and string contents")
 func prettyPrint() {
-    let formatted = JSONHighlighter.prettyPrint("{\"b\":1,\"a\":2}")
-    #expect(formatted != nil)
-    #expect(formatted!.contains("\"a\" : 2"))
+    let input = #"{"b":1,"a":{"rating":4.7,"big":1E+5,"price":129.0,"url":"https:\/\/x.test","odd":"a,b:{c}[d] \"q\"","empty":[],"none":{ }},"list":[1,true,null]}"#
+    let expected = """
+    {
+      "b": 1,
+      "a": {
+        "rating": 4.7,
+        "big": 1E+5,
+        "price": 129.0,
+        "url": "https:\\/\\/x.test",
+        "odd": "a,b:{c}[d] \\"q\\"",
+        "empty": [],
+        "none": {}
+      },
+      "list": [
+        1,
+        true,
+        null
+      ]
+    }
+    """
+    #expect(JSONHighlighter.prettyPrint(input) == expected)
+    #expect(JSONHighlighter.prettyPrint("{\n  \"é\" : \"ü\"\n}") == "{\n  \"é\": \"ü\"\n}")
+    #expect(JSONHighlighter.prettyPrint(#"[{"a":"x\\"},"\ud83d\ude00",[ ]]"#) == "[\n  {\n    \"a\": \"x\\\\\"\n  },\n  \"\\ud83d\\ude00\",\n  []\n]")
     #expect(JSONHighlighter.prettyPrint("not json") == nil)
+    #expect(JSONHighlighter.prettyPrint("{\"a\":1") == nil)
 }
 
 @Test("status phrases")
